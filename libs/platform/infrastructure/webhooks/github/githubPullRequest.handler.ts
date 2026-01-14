@@ -15,6 +15,7 @@ import { getMappedPlatform } from '@libs/common/utils/webhooks';
 import { SavePullRequestUseCase } from '@libs/platformData/application/use-cases/pullRequests/save.use-case';
 import { RunCodeReviewAutomationUseCase } from '@libs/ee/automation/runCodeReview.use-case';
 import { PullRequestClosedEvent } from '@libs/core/domain/events/pull-request-closed.event';
+import { EnqueueImplementationCheckUseCase } from '@libs/code-review/application/use-cases/enqueue-implementation-check.use-case';
 
 /**
  * Handler for GitHub webhook events.
@@ -31,6 +32,7 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
         private readonly generateIssuesFromPrClosedUseCase: GenerateIssuesFromPrClosedUseCase,
         private readonly eventEmitter: EventEmitter2,
         private readonly enqueueCodeReviewJobUseCase: EnqueueCodeReviewJobUseCase,
+        private readonly enqueueImplementationCheckUseCase: EnqueueImplementationCheckUseCase,
     ) {}
 
     public canHandle(params: IWebhookEventParams): boolean {
@@ -169,6 +171,36 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
                 });
             }
 
+            if (payload?.action === 'synchronize') {
+                try {
+                    if (validationResult?.organizationAndTeamData) {
+                        await this.enqueueImplementationCheckUseCase.execute({
+                            organizationAndTeamData:
+                                validationResult.organizationAndTeamData,
+                            repository: {
+                                id: repository.id,
+                                name: repository.name,
+                            },
+                            pullRequestNumber: payload?.pull_request?.number,
+                            commitSha: payload?.after || payload?.head?.sha,
+                            trigger: 'synchronize',
+                        });
+                    }
+                } catch (e) {
+                    this.logger.error({
+                        message: 'Failed to enqueue implementation check',
+                        context: GitHubPullRequestHandler.name,
+                        error: e,
+                        metadata: {
+                            organizationAndTeamData:
+                                validationResult?.organizationAndTeamData,
+                            repository,
+                            pullRequestNumber: payload?.pull_request?.number,
+                        },
+                    });
+                }
+            }
+
             if (payload?.action === 'closed') {
                 await this.generateIssuesFromPrClosedUseCase.execute(params);
 
@@ -178,6 +210,25 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
                 if (merged && baseRef) {
                     try {
                         if (validationResult?.organizationAndTeamData) {
+                            // Enqueue Implementation Check on Merge
+                            await this.enqueueImplementationCheckUseCase.execute(
+                                {
+                                    organizationAndTeamData:
+                                        validationResult.organizationAndTeamData,
+                                    repository: {
+                                        id: repository.id,
+                                        name: repository.name,
+                                    },
+                                    pullRequestNumber:
+                                        payload?.pull_request?.number,
+                                    commitSha:
+                                        payload?.pull_request
+                                            ?.merge_commit_sha ||
+                                        payload?.pull_request?.head?.sha,
+                                    trigger: 'closed',
+                                },
+                            );
+
                             const defaultBranch =
                                 await this.codeManagement.getDefaultBranch({
                                     organizationAndTeamData:

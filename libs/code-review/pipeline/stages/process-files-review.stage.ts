@@ -49,7 +49,7 @@ import {
 export class ProcessFilesReview extends BasePipelineStage<CodeReviewPipelineContext> {
     readonly stageName = 'FileAnalysisStage';
 
-    private readonly concurrencyLimit = 20;
+    private readonly concurrencyLimit = 30;
     private readonly logger = createLogger(ProcessFilesReview.name);
 
     constructor(
@@ -673,6 +673,8 @@ export class ProcessFilesReview extends BasePipelineStage<CodeReviewPipelineCont
         ];
 
         // If it's a commit, validate repeated suggestions
+        // NOTE: This logic is also handled asynchronously by ImplementationVerificationProcessor
+        // We keep it here to ensure immediate feedback within the review session context
         if (context?.action && VALID_ACTIONS.includes(context.action)) {
             const savedSuggestions =
                 await this.pullRequestService.findSuggestionsByPRAndFilename(

@@ -44,6 +44,9 @@ import { KodyASTModule } from '@libs/ee/kodyAST/kodyAST.module';
 import { AutomationModule } from '@libs/automation/modules/automation.module';
 import { GithubChecksService } from '@libs/platform/infrastructure/adapters/services/github/github-checks.service';
 import { GithubModule } from '@libs/platform/modules/github.module';
+import { EnqueueImplementationCheckUseCase } from '../application/use-cases/enqueue-implementation-check.use-case';
+import { ImplementationVerificationProcessor } from '../application/processors/implementation-verification.processor';
+import { VerifyImplementationUseCase } from '../application/use-cases/verify-implementation.use-case';
 
 @Module({
     imports: [
@@ -100,6 +103,11 @@ import { GithubModule } from '@libs/platform/modules/github.module';
         GithubChecksService,
         CreateGithubCheckStage,
         FinalizeGithubCheckStage,
+
+        // Implementation Verification
+        ImplementationVerificationProcessor,
+        EnqueueImplementationCheckUseCase,
+        VerifyImplementationUseCase,
     ],
     exports: [
         CodeReviewPipelineStrategyEE,
@@ -121,6 +129,9 @@ import { GithubModule } from '@libs/platform/modules/github.module';
         LOAD_EXTERNAL_CONTEXT_STAGE_TOKEN,
         CreateGithubCheckStage,
         FinalizeGithubCheckStage,
+        ImplementationVerificationProcessor,
+        EnqueueImplementationCheckUseCase,
+        VerifyImplementationUseCase,
     ],
 })
 export class CodeReviewPipelineModule {}

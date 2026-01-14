@@ -81,13 +81,13 @@ export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
             connectionString: 'mongodb://localhost:27017/kodus',
             database: 'kodus',
             collections: {
-                logs: 'observability_logs',
+                logs: 'observability_logs_ts',
                 telemetry: 'observability_telemetry',
             },
             batchSize: 50,
             flushIntervalMs: 15000,
             maxRetries: 3,
-            ttlDays: 30,
+            ttlDays: 0, // Disabled by default (Infinite retention)
             enableObservability: true,
             ...config,
         };
@@ -266,6 +266,9 @@ export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
                 ),
             };
 
+            // Ensure Time-Series collection exists (MongoDB 5.0+)
+            await this.ensureTimeSeriesCollection(this.config.collections.logs);
+
             // Creating indexes for performance
             await this.createIndexes();
 
@@ -301,6 +304,82 @@ export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
     }
 
     /**
+     * Ensure Time-Series collection is created with optimal settings
+     */
+    private async ensureTimeSeriesCollection(
+        collectionName: string,
+    ): Promise<void> {
+        try {
+            const collections = await this.db
+                .listCollections({ name: collectionName })
+                .toArray();
+            if (collections.length === 0) {
+                this.logger.log({
+                    message: `Creating Time-Series collection: ${collectionName}`,
+                    context: this.constructor.name,
+                });
+
+                // 14 days in seconds
+                const ttlSeconds = this.config.ttlDays * 24 * 60 * 60;
+
+                await this.db.createCollection(collectionName, {
+                    timeseries: {
+                        timeField: 'timestamp',
+                        metaField: 'metadata',
+                        granularity: 'seconds',
+                    },
+                    expireAfterSeconds: ttlSeconds,
+                });
+            }
+        } catch (error) {
+            this.logger.warn({
+                message:
+                    'Failed to ensure Time-Series collection (might already exist or not supported)',
+                context: this.constructor.name,
+                error: error as Error,
+            });
+        }
+    }
+
+    /**
+     * Ensure Time-Series collection is created with optimal settings
+     */
+    private async ensureTimeSeriesCollection(
+        collectionName: string,
+    ): Promise<void> {
+        try {
+            const collections = await this.db
+                .listCollections({ name: collectionName })
+                .toArray();
+            if (collections.length === 0) {
+                this.logger.log({
+                    message: `Creating Time-Series collection: ${collectionName}`,
+                    context: this.constructor.name,
+                });
+
+                // 14 days in seconds
+                const ttlSeconds = this.config.ttlDays * 24 * 60 * 60;
+
+                await this.db.createCollection(collectionName, {
+                    timeseries: {
+                        timeField: 'timestamp',
+                        metaField: 'metadata',
+                        granularity: 'seconds',
+                    },
+                    expireAfterSeconds: ttlSeconds,
+                });
+            }
+        } catch (error) {
+            this.logger.warn({
+                message:
+                    'Failed to ensure Time-Series collection (might already exist or not supported)',
+                context: this.constructor.name,
+                error: error as Error,
+            });
+        }
+    }
+
+    /**
      * Creating indexes for performance
      */
     private async createIndexes(): Promise<void> {
@@ -310,11 +389,30 @@ export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
 
         try {
             // Logs indexes
-            await this.collections.logs.createIndex({ timestamp: 1 });
-            await this.collections.logs.createIndex({ correlationId: 1 });
-            await this.collections.logs.createIndex({ tenantId: 1 });
-            await this.collections.logs.createIndex({ level: 1 });
-            await this.collections.logs.createIndex({ component: 1 });
+            // Note: Time-Series automatically indexes 'timestamp' (clustered)
+            // We only need secondary indexes for lookup patterns
+            try {
+                await this.collections.logs.createIndex({ correlationId: 1 });
+                // Compound indexes for metadata queries (Time-Series optimization)
+                await this.collections.logs.createIndex({
+                    'metadata.component': 1,
+                });
+                await this.collections.logs.createIndex({
+                    'metadata.tenantId': 1,
+                });
+                await this.collections.logs.createIndex({
+                    'metadata.organizationId': 1,
+                });
+                await this.collections.logs.createIndex({
+                    'metadata.teamId': 1,
+                });
+                await this.collections.logs.createIndex({
+                    'metadata.prNumber': 1,
+                }); // Optimized for PR lookups
+                await this.collections.logs.createIndex({ level: 1 });
+            } catch (e) {
+                // Ignore index creation errors on existing collections
+            }
 
             // Telemetry indexes
             await this.collections.telemetry.createIndex({ timestamp: 1 });
@@ -544,6 +642,16 @@ export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
             // Optionally log internally that we dropped logs, but be careful not to loop
         }
 
+        // Extract critical fields for top-level metadata (better indexing/compression)
+        const organizationId =
+            (context as any)?.organizationId ||
+            (context as any)?.organizationAndTeamData?.organizationId;
+        const teamId =
+            (context as any)?.teamId ||
+            (context as any)?.organizationAndTeamData?.teamId;
+        const prNumber =
+            (context as any)?.prNumber || (context as any)?.pullRequest?.number;
+
         const logItem: MongoDBLogItem = {
             timestamp: new Date(),
             level,
@@ -553,7 +661,18 @@ export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
             tenantId: context?.tenantId as string | undefined,
             executionId: context?.executionId as string | undefined,
             sessionId: context?.sessionId as string | undefined,
-            metadata: context,
+            metadata: {
+                ...context,
+                // Critical for Time-Series grouping efficiency & Indexing
+                component,
+                tenantId: context?.tenantId,
+                correlationId: context?.correlationId,
+                level,
+                // Promoted fields for Indexing
+                organizationId,
+                teamId,
+                prNumber,
+            },
             error: error
                 ? {
                       name: error.name,
