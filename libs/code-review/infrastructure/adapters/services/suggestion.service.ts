@@ -52,10 +52,10 @@ export class SuggestionService implements ISuggestionService {
      * Removes suggestions related to files that already have saved suggestions
      */
     public async removeSuggestionsRelatedToSavedFiles(
-        organizationAndTeamData,
+        organizationAndTeamData: OrganizationAndTeamData,
         prNumber: string,
-        savedSuggestions,
-        newSuggestions,
+        savedSuggestions: any[],
+        newSuggestions: any[],
     ): Promise<any> {
         try {
             const filesWithSavedSuggestions = new Set(
@@ -100,8 +100,8 @@ export class SuggestionService implements ISuggestionService {
      * Validates if suggestions have been implemented by analyzing code patches
      */
     public async validateImplementedSuggestions(
-        organizationAndTeamData,
-        codePatch,
+        organizationAndTeamData: OrganizationAndTeamData,
+        codePatch: string,
         savedSuggestions: Partial<CodeSuggestion>[],
         prNumber?: number,
     ) {
@@ -485,7 +485,7 @@ export class SuggestionService implements ISuggestionService {
     /**
      * Adds related suggestions when parent suggestions are prioritized
      */
-    private async addRelatedSuggestionsFromPrioritizedParents(
+    public async addRelatedSuggestionsFromPrioritizedParents(
         suggestionsClustered: Partial<CodeSuggestion>[],
         prioritizedByQuantity: Partial<CodeSuggestion>[],
     ): Promise<Partial<CodeSuggestion>[]> {
@@ -546,12 +546,12 @@ export class SuggestionService implements ISuggestionService {
         );
     }
 
-    private async prioritizeSuggestionsLegacy(
+    public async prioritizeSuggestionsLegacy(
         organizationAndTeamData: OrganizationAndTeamData,
         suggestionControl: SuggestionControlConfig,
         prNumber: number,
         suggestions: any[],
-        byokConfig?: BYOKConfig,
+        _byokConfig?: BYOKConfig,
     ): Promise<{
         prioritizedSuggestions: any[];
         discardedSuggestionsBySeverityOrQuantity: any[];

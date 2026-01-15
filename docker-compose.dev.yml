@@ -48,7 +48,8 @@ services:
             - API_LOG_PRETTY=true
             - CHOKIDAR_USEPOLLING=false
             - API_DEVELOPMENT_MODE=${API_DEVELOPMENT_MODE:-true}
-            - RUN_MIGRATIONS=true
+            - RUN_MIGRATIONS=${RUN_MIGRATIONS:-true}
+            - RUN_SEEDS=${RUN_SEEDS:-true}
 
     worker:
         <<: *app-service-defaults

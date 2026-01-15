@@ -48,6 +48,10 @@ import { EnqueueImplementationCheckUseCase } from '../application/use-cases/enqu
 import { ImplementationVerificationProcessor } from '../application/processors/implementation-verification.processor';
 import { VerifyImplementationUseCase } from '../application/use-cases/verify-implementation.use-case';
 
+import { ImplementationVerificationProcessor } from '../application/processors/implementation-verification.processor';
+import { EnqueueImplementationCheckUseCase } from '../application/use-cases/enqueue-implementation-check.use-case';
+import { VerifyImplementationUseCase } from '../application/use-cases/verify-implementation.use-case';
+
 @Module({
     imports: [
         forwardRef(() => CodebaseModule),

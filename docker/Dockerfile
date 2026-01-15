@@ -1,4 +1,4 @@
-FROM node:22.19.0-slim AS base
+FROM node:22.22.0-slim AS base
 WORKDIR /usr/src/app
 
 ARG API_CLOUD_MODE=false
@@ -43,7 +43,7 @@ COPY package.json yarn.lock .npmrc ./
 RUN yarn install --production --frozen-lockfile && yarn cache clean
 
 
-FROM node:22.19.0-slim AS runtime-common
+FROM node:22.22.0-slim AS runtime-common
 WORKDIR /usr/src/app
 ENV NODE_ENV=production
 

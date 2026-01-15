@@ -19,6 +19,7 @@ import {
 import { promises as fs } from 'fs';
 import { EOL, tmpdir } from 'os';
 import { join } from 'path';
+import { randomUUID } from 'crypto';
 
 export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
     public readonly name = 'MongoDBExporter';
@@ -268,6 +269,10 @@ export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
 
             // Ensure Time-Series collection exists (MongoDB 5.0+)
             await this.ensureTimeSeriesCollection(this.config.collections.logs);
+            // Also optimize Telemetry collection as Time-Series
+            await this.ensureTimeSeriesCollection(
+                this.config.collections.telemetry,
+            );
 
             // Creating indexes for performance
             await this.createIndexes();
@@ -319,55 +324,27 @@ export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
                     context: this.constructor.name,
                 });
 
-                // 14 days in seconds
-                const ttlSeconds = this.config.ttlDays * 24 * 60 * 60;
-
-                await this.db.createCollection(collectionName, {
+                const options: any = {
                     timeseries: {
                         timeField: 'timestamp',
                         metaField: 'metadata',
                         granularity: 'seconds',
                     },
-                    expireAfterSeconds: ttlSeconds,
-                });
-            }
-        } catch (error) {
-            this.logger.warn({
-                message:
-                    'Failed to ensure Time-Series collection (might already exist or not supported)',
-                context: this.constructor.name,
-                error: error as Error,
-            });
-        }
-    }
+                };
 
-    /**
-     * Ensure Time-Series collection is created with optimal settings
-     */
-    private async ensureTimeSeriesCollection(
-        collectionName: string,
-    ): Promise<void> {
-        try {
-            const collections = await this.db
-                .listCollections({ name: collectionName })
-                .toArray();
-            if (collections.length === 0) {
-                this.logger.log({
-                    message: `Creating Time-Series collection: ${collectionName}`,
-                    context: this.constructor.name,
-                });
+                // Only set TTL if configured (> 0)
+                if (this.config.ttlDays && this.config.ttlDays > 0) {
+                    options.expireAfterSeconds =
+                        this.config.ttlDays * 24 * 60 * 60;
+                } else {
+                    this.logger.log({
+                        message:
+                            'Time-Series created with INFINITE retention (No TTL)',
+                        context: this.constructor.name,
+                    });
+                }
 
-                // 14 days in seconds
-                const ttlSeconds = this.config.ttlDays * 24 * 60 * 60;
-
-                await this.db.createCollection(collectionName, {
-                    timeseries: {
-                        timeField: 'timestamp',
-                        metaField: 'metadata',
-                        granularity: 'seconds',
-                    },
-                    expireAfterSeconds: ttlSeconds,
-                });
+                await this.db.createCollection(collectionName, options);
             }
         } catch (error) {
             this.logger.warn({
@@ -393,25 +370,33 @@ export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
             // We only need secondary indexes for lookup patterns
             try {
                 await this.collections.logs.createIndex({ correlationId: 1 });
-                // Compound indexes for metadata queries (Time-Series optimization)
-                await this.collections.logs.createIndex({
-                    'metadata.component': 1,
-                });
-                await this.collections.logs.createIndex({
-                    'metadata.tenantId': 1,
-                });
-                await this.collections.logs.createIndex({
-                    'metadata.organizationId': 1,
-                });
-                await this.collections.logs.createIndex({
-                    'metadata.teamId': 1,
-                });
-                await this.collections.logs.createIndex({
-                    'metadata.prNumber': 1,
-                }); // Optimized for PR lookups
                 await this.collections.logs.createIndex({ level: 1 });
-            } catch (e) {
-                // Ignore index creation errors on existing collections
+
+                // Dynamic Secondary Indexes (Configurable)
+                // Defaults to standard SaaS pattern if not provided
+                const defaultSecondaryIndexes = [
+                    'metadata.component',
+                    'metadata.tenantId',
+                    'metadata.organizationId',
+                    'metadata.teamId',
+                ];
+
+                const indexesToCreate =
+                    this.config.secondaryIndexes || defaultSecondaryIndexes;
+
+                for (const field of indexesToCreate) {
+                    try {
+                        await this.collections.logs.createIndex({ [field]: 1 });
+                    } catch (idxError) {
+                        this.logger.debug({
+                            message: `Failed to create index for ${field}`,
+                            context: this.constructor.name,
+                            error: idxError as Error,
+                        });
+                    }
+                }
+            } catch {
+                // Ignore general index creation errors
             }
 
             // Telemetry indexes
@@ -642,37 +627,60 @@ export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
             // Optionally log internally that we dropped logs, but be careful not to loop
         }
 
-        // Extract critical fields for top-level metadata (better indexing/compression)
-        const organizationId =
-            (context as any)?.organizationId ||
-            (context as any)?.organizationAndTeamData?.organizationId;
-        const teamId =
-            (context as any)?.teamId ||
-            (context as any)?.organizationAndTeamData?.teamId;
-        const prNumber =
-            (context as any)?.prNumber || (context as any)?.pullRequest?.number;
+        // Extract and normalize critical fields for Bucketing (Configurable)
+        // Defaults to basic fields if no bucket keys provided
+        const bucketKeys = this.config.bucketKeys || [
+            'component',
+            'level',
+            'tenantId',
+        ];
+
+        // Metadata: Only contains Low-Cardinality fields for grouping
+        const metadata: Record<string, any> = {
+            component,
+            level,
+        };
+
+        // Attributes: Contains high-cardinality details (Payload)
+        const attributes = {
+            ...context,
+            originalCorrelationId: context?.correlationId,
+        };
+
+        // Extract configured bucket keys from context
+        for (const key of bucketKeys) {
+            // Skip already set basic fields
+            if (key === 'component' || key === 'level') continue;
+
+            const value = (context as any)?.[key];
+            if (value) {
+                metadata[key] = value;
+            } else {
+                // Critical for Time-Series performance: Avoid null buckets
+                metadata[key] = 'unknown';
+            }
+        }
+
+        // Ensure correlationId always exists (Index Key)
+        const correlationId =
+            (context?.correlationId as string) || randomUUID();
+
+        // Ensure tenantId exists in metadata (common requirement)
+        if (!metadata.tenantId) {
+            metadata.tenantId = (context?.tenantId as string) || 'unknown';
+        }
 
         const logItem: MongoDBLogItem = {
             timestamp: new Date(),
             level,
             message,
             component,
-            correlationId: context?.correlationId as string | undefined,
-            tenantId: context?.tenantId as string | undefined,
+            correlationId, // Guaranteed UUID
+            tenantId: metadata.tenantId,
             executionId: context?.executionId as string | undefined,
             sessionId: context?.sessionId as string | undefined,
-            metadata: {
-                ...context,
-                // Critical for Time-Series grouping efficiency & Indexing
-                component,
-                tenantId: context?.tenantId,
-                correlationId: context?.correlationId,
-                level,
-                // Promoted fields for Indexing
-                organizationId,
-                teamId,
-                prNumber,
-            },
+            metadata, // Clean bucket key
+            attributes, // Detailed payload (schema-less)
             error: error
                 ? {
                       name: error.name,
@@ -681,7 +689,7 @@ export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
                   }
                 : undefined,
             createdAt: new Date(),
-        };
+        } as any; // Cast necessary due to dynamic 'attributes' field injection
 
         this.logBuffer.push(logItem);
 
@@ -826,6 +834,24 @@ export class MongoDBExporter implements LogProcessor, ObservabilityExporter {
         this.isFlushingLogs = true;
         const logsToFlush = [...this.logBuffer];
         this.logBuffer = [];
+
+        // PERFORMANCE OPTIMIZATION: Sort by Bucket Keys before inserting.
+        // This drastically improves Time-Series compression and write throughput.
+        const bucketKeys = this.config.bucketKeys || [
+            'organizationId',
+            'teamId',
+        ];
+
+        logsToFlush.sort((a, b) => {
+            for (const key of bucketKeys) {
+                const valA = (a.metadata as any)?.[key] || '';
+                const valB = (b.metadata as any)?.[key] || '';
+                if (valA !== valB) {
+                    return String(valA).localeCompare(String(valB));
+                }
+            }
+            return 0;
+        });
 
         try {
             await this.collections.logs.insertMany(logsToFlush);
@@ -1316,6 +1342,8 @@ export function createMongoDBExporterFromStorage(
         maxRetries: 3,
         ttlDays: storageConfig.ttlDays ?? 30,
         enableObservability: storageConfig.enableObservability ?? true,
+        secondaryIndexes: storageConfig.secondaryIndexes,
+        bucketKeys: storageConfig.bucketKeys,
     };
 
     return new MongoDBExporter(config);

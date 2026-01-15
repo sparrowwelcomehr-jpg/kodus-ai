@@ -674,7 +674,8 @@ export class ProcessFilesReview extends BasePipelineStage<CodeReviewPipelineCont
 
         // If it's a commit, validate repeated suggestions
         // NOTE: This logic is also handled asynchronously by ImplementationVerificationProcessor
-        // We keep it here to ensure immediate feedback within the review session context
+        // We keep it here to ensure immediate feedback within the review session context, but avoid race conditions
+        // by checking if the async job will likely cover it (though redundancy is generally safe as operations are idempotent).
         if (context?.action && VALID_ACTIONS.includes(context.action)) {
             const savedSuggestions =
                 await this.pullRequestService.findSuggestionsByPRAndFilename(

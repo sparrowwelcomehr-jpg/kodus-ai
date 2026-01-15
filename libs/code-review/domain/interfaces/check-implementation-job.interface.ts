@@ -1,12 +1,9 @@
-import { OrganizationAndTeamData } from '@libs/core/infrastructure/config/types/general/organizationAndTeamData';
+import { OrganizationAndTeamData } from '@libs/core/domain/types/organization-and-team-data.type';
 
 export interface CheckImplementationJobPayload {
     organizationAndTeamData: OrganizationAndTeamData;
-    repository: {
-        id: string;
-        name: string;
-    };
+    repository: { id: string; name: string };
     pullRequestNumber: number;
     commitSha: string;
-    trigger: 'synchronize' | 'closed' | 'manual';
+    trigger: 'synchronize' | 'closed';
 }
