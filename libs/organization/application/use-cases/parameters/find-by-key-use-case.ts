@@ -46,9 +46,7 @@ export class FindByKeyParametersUseCase {
         private readonly parametersService: IParametersService,
         private readonly configService: ConfigService,
     ) {
-        this.cacheTTL =
-            this.configService.get<number>('PARAMETERS_CACHE_TTL_MS') ??
-            DEFAULT_CACHE_TTL_MS;
+        this.cacheTTL = this.configService.get<number>('PARAMETERS_CACHE_TTL_MS', DEFAULT_CACHE_TTL_MS);
     }
 
     /**
