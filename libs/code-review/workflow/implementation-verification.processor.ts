@@ -1,5 +1,15 @@
 import { Injectable, Inject } from '@nestjs/common';
 import { IJobProcessorService } from '@libs/core/workflow/domain/contracts/job-processor.service.contract';
+import {
+    IAutomationExecutionService,
+    AUTOMATION_EXECUTION_SERVICE_TOKEN,
+} from '@libs/automation/domain/automationExecution/contracts/automation-execution.service';
+import { AutomationStatus } from '@libs/automation/domain/automation/enum/automation-status';
+import {
+    ITeamAutomationService,
+    TEAM_AUTOMATION_SERVICE_TOKEN,
+} from '@libs/automation/domain/teamAutomation/contracts/team-automation.service';
+import { AutomationType } from '@libs/automation/domain/automation/enum/automation-type';
 import { WorkflowType } from '@libs/core/workflow/domain/enums/workflow-type.enum';
 import {
     IWorkflowJobRepository,
@@ -40,6 +50,10 @@ export class ImplementationVerificationProcessor implements IJobProcessorService
         private readonly pullRequestsService: IPullRequestsService,
         @Inject(PULL_REQUEST_MANAGER_SERVICE_TOKEN)
         private readonly pullRequestManagerService: IPullRequestManagerService,
+        @Inject(AUTOMATION_EXECUTION_SERVICE_TOKEN)
+        private readonly automationExecutionService: IAutomationExecutionService,
+        @Inject(TEAM_AUTOMATION_SERVICE_TOKEN)
+        private readonly teamAutomationService: ITeamAutomationService,
     ) {}
 
     async process(jobId: string): Promise<void> {
@@ -114,34 +128,29 @@ export class ImplementationVerificationProcessor implements IJobProcessorService
                     payload.pullRequestNumber,
                 ));
 
-            let lastCommitObj: any;
+            const teamAutomations = await this.teamAutomationService.find({
+                team: { uuid: payload.organizationAndTeamData.teamId },
+                automation: {
+                    automationType: AutomationType.AUTOMATION_CODE_REVIEW,
+                },
+                status: true,
+            });
 
-            const beforeSha =
-                payload.payload?.before || // GitHub
-                payload.payload?.object_attributes?.oldrev || // GitLab
-                payload.payload?.previous?.source?.commit?.hash; // Bitbucket
+            const teamAutomation = teamAutomations?.[0];
 
-            if (beforeSha) {
-                try {
-                    const commits =
-                        await this.pullRequestManagerService.getNewCommitsSinceLastExecution(
-                            payload.organizationAndTeamData,
-                            {
-                                name: payload.repository.name,
-                                id: payload.repository.id,
-                            },
-                            platformPr,
-                        );
+            // Retrieve last analyzed commit from the last successful code review execution
+            const lastExecution =
+                await this.automationExecutionService.findLatestExecutionByFilters(
+                    {
+                        pullRequestNumber: payload.pullRequestNumber,
+                        repositoryId: payload.repository.id,
+                        status: AutomationStatus.SUCCESS,
+                        teamAutomation: { uuid: teamAutomation?.uuid },
+                    },
+                );
 
-                    lastCommitObj = commits?.find((c) => c.sha === beforeSha);
-                } catch (error) {
-                    this.logger.warn({
-                        message: `Failed to fetch commits to find before commit ${beforeSha}`,
-                        context: ImplementationVerificationProcessor.name,
-                        error,
-                    });
-                }
-            }
+            const lastAnalyzedCommit =
+                lastExecution?.dataExecution?.lastAnalyzedCommit;
 
             // 3. Fetch Changed Files (Diff)
             const changedFiles =
@@ -153,7 +162,7 @@ export class ImplementationVerificationProcessor implements IJobProcessorService
                     },
                     platformPr,
                     [],
-                    lastCommitObj,
+                    lastAnalyzedCommit,
                 );
 
             // 4. Construct Code Patch
