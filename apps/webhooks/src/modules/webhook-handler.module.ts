@@ -16,11 +16,16 @@ import { GithubController } from '../controllers/github.controller';
 import { GitlabController } from '../controllers/gitlab.controller';
 import { WebhookHealthController } from '../controllers/webhook-health.controller';
 
+import { ConfigService } from '@nestjs/config';
+
 @Module({
     imports: [
-        DevtoolsModule.register({
-            http: process.env.NODE_ENV !== 'production',
-            port: 8002,
+        DevtoolsModule.registerAsync({
+            inject: [ConfigService],
+            useFactory: (configService: ConfigService) => ({
+                http: configService.get('NODE_ENV') !== 'production',
+                port: 8002,
+            }),
         }),
         SharedCoreModule,
         SharedConfigModule,

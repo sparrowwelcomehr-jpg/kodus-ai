@@ -115,7 +115,11 @@ export class ImplementationVerificationProcessor implements IJobProcessorService
                 ));
 
             let lastCommitObj: any;
-            const beforeSha = payload.payload?.before;
+
+            const beforeSha =
+                payload.payload?.before || // GitHub
+                payload.payload?.object_attributes?.oldrev || // GitLab
+                payload.payload?.previous?.source?.commit?.hash; // Bitbucket
 
             if (beforeSha) {
                 try {

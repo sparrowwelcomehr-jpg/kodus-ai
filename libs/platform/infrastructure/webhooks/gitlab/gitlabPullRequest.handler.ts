@@ -79,7 +79,7 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
     private async handleMergeRequest(
         params: IWebhookEventParams,
     ): Promise<void> {
-        const { payload } = params;
+        const { payload, event } = params;
         const mrNumber = payload?.object_attributes?.iid;
         const mrUrl = payload?.object_attributes?.url;
 
@@ -92,7 +92,7 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
 
         const repository = {
             id: String(payload?.project?.id),
-            name: payload?.project?.path,
+            name: payload?.project?.name || payload?.project?.path,
             fullName: payload?.project?.path_with_namespace,
         } as any;
 
@@ -178,10 +178,43 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
                     });
                 }
 
+                if (this.isNewCommitUpdate(payload)) {
+                    if (orgData?.organizationAndTeamData) {
+                        this.enqueueImplementationCheckUseCase
+                            .execute({
+                                repository: {
+                                    id: repository.id,
+                                    name: repository.name,
+                                },
+                                pullRequestNumber:
+                                    payload?.object_attributes?.iid,
+                                commitSha:
+                                    payload?.object_attributes?.last_commit?.id,
+                                trigger: payload?.object_attributes?.action,
+                                payload: payload,
+                                event: event,
+                                organizationAndTeamData:
+                                    orgData.organizationAndTeamData,
+                                platformType: PlatformType.GITLAB,
+                            })
+                            .catch((e) => {
+                                this.logger.error({
+                                    message:
+                                        'Failed to enqueue implementation check',
+                                    context: GitLabMergeRequestHandler.name,
+                                    error: e,
+                                    metadata: {
+                                        repository,
+                                        pullRequestNumber:
+                                            payload?.object_attributes?.iid,
+                                    },
+                                });
+                            });
+                    }
+                }
+
                 if (payload?.object_attributes?.action === 'merge') {
                     this.generateIssuesFromPrClosedUseCase.execute(params);
-
-                    // Sync Kody Rules after merge into target branch
 
                     try {
                         if (orgData?.organizationAndTeamData) {
@@ -239,38 +272,6 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
             ) {
                 // For closed or merged MRs, just save the state without triggering automation
                 await this.savePullRequestUseCase.execute(params);
-
-                if (payload?.object_attributes?.action === 'update') {
-                    if (orgData?.organizationAndTeamData) {
-                        this.enqueueImplementationCheckUseCase
-                            .execute({
-                                organizationAndTeamData:
-                                    orgData.organizationAndTeamData,
-                                repository: {
-                                    id: repository.id,
-                                    name: repository.name,
-                                },
-                                pullRequestNumber:
-                                    payload?.object_attributes?.iid,
-                                commitSha:
-                                    payload?.object_attributes?.last_commit?.id,
-                                trigger: 'synchronize',
-                            })
-                            .catch((e) => {
-                                this.logger.error({
-                                    message:
-                                        'Failed to enqueue implementation check',
-                                    context: GitLabMergeRequestHandler.name,
-                                    error: e,
-                                    metadata: {
-                                        repository,
-                                        pullRequestNumber:
-                                            payload?.object_attributes?.iid,
-                                    },
-                                });
-                            });
-                    }
-                }
 
                 if (payload?.object_attributes?.action === 'merge') {
                     this.generateIssuesFromPrClosedUseCase
@@ -464,5 +465,18 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
 
         // For all other cases, return false
         return false;
+    }
+
+    private isNewCommitUpdate(payload: any): boolean {
+        const objectAttributes = payload?.object_attributes || {};
+
+        if (objectAttributes.action !== 'update') {
+            return false;
+        }
+
+        const lastCommitId = objectAttributes.last_commit?.id;
+        const oldRev = objectAttributes.oldrev;
+
+        return !!(lastCommitId && oldRev && lastCommitId !== oldRev);
     }
 }

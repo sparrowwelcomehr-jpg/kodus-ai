@@ -156,6 +156,9 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
                         if (orgData?.organizationAndTeamData) {
                             this.enqueueImplementationCheckUseCase
                                 .execute({
+                                    payload: payload,
+                                    event: event,
+                                    platformType: PlatformType.BITBUCKET,
                                     organizationAndTeamData:
                                         orgData.organizationAndTeamData,
                                     repository: {
@@ -179,6 +182,8 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
                                             repository,
                                             pullRequestNumber:
                                                 payload?.pullrequest?.id,
+                                            organizationAndTeamData:
+                                                orgData.organizationAndTeamData,
                                         },
                                     });
                                 });
@@ -189,7 +194,7 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
                         this.enqueueCodeReviewJobUseCase &&
                         orgData?.organizationAndTeamData
                     ) {
-                        const jobId = this.enqueueCodeReviewJobUseCase
+                        this.enqueueCodeReviewJobUseCase
                             .execute({
                                 payload: params.payload,
                                 event: params.event,
@@ -219,6 +224,8 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
                                     metadata: {
                                         prId,
                                         repositoryId: repository.id,
+                                        organizationAndTeamData:
+                                            orgData.organizationAndTeamData,
                                     },
                                 });
                             });

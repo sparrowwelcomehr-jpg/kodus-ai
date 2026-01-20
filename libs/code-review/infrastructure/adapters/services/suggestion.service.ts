@@ -383,7 +383,10 @@ export class SuggestionService implements ISuggestionService {
             });
 
             // PERF: Categorizar sugestões em uma única passagem (antes eram 4 filters)
-            const categorizedSuggestions: Record<string, Partial<CodeSuggestion>[]> = {
+            const categorizedSuggestions: Record<
+                string,
+                Partial<CodeSuggestion>[]
+            > = {
                 critical: [],
                 high: [],
                 medium: [],
@@ -500,20 +503,20 @@ export class SuggestionService implements ISuggestionService {
     ): Promise<Partial<CodeSuggestion>[]> {
         const prioritizedIds = new Set(prioritizedByQuantity.map((s) => s.id));
 
-        const relatedToPrioritized = suggestionsClustered
-            .filter(
-                (suggestion) =>
-                    suggestion.clusteringInformation?.type ===
-                        ClusteringType.RELATED &&
-                    suggestion.clusteringInformation?.parentSuggestionId &&
-                    prioritizedIds.has(
-                        suggestion.clusteringInformation.parentSuggestionId,
-                    ),
-            );
+        const relatedToPrioritized = suggestionsClustered.filter(
+            (suggestion) =>
+                suggestion.clusteringInformation?.type ===
+                    ClusteringType.RELATED &&
+                suggestion.clusteringInformation?.parentSuggestionId &&
+                prioritizedIds.has(
+                    suggestion.clusteringInformation.parentSuggestionId,
+                ),
+        );
 
         // PERF: Mutar in-place ao invés de criar novos objetos
         for (const suggestion of relatedToPrioritized) {
-            suggestion.priorityStatus = PriorityStatus.PRIORITIZED_BY_CLUSTERING;
+            suggestion.priorityStatus =
+                PriorityStatus.PRIORITIZED_BY_CLUSTERING;
         }
 
         return [...prioritizedByQuantity, ...relatedToPrioritized];
@@ -1762,9 +1765,15 @@ export class SuggestionService implements ISuggestionService {
                           Number(comment.fullDatabaseId),
                       ),
                   )
-                : reviewComments.filter((comment) =>
-                      implementedSuggestionsCommentIds.includes(comment.id),
-                  );
+                : platformType === PlatformType.AZURE_REPOS
+                  ? reviewComments.filter((comment) =>
+                        implementedSuggestionsCommentIds.includes(
+                            Number(comment.threadId),
+                        ),
+                    )
+                  : reviewComments.filter((comment) =>
+                        implementedSuggestionsCommentIds.includes(comment.id),
+                    );
 
             if (foundComments?.length > 0) {
                 const promises = foundComments.map(

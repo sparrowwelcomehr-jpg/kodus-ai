@@ -18,11 +18,17 @@ import { OutboxRelayService } from '@libs/core/workflow/infrastructure/outbox-re
 import { ScheduleModule } from '@nestjs/schedule';
 import { WorkerDrainService } from './worker-drain.service';
 
+import { ConfigService } from '@nestjs/config';
+
 @Module({
     imports: [
-        DevtoolsModule.register({
-            http: process.env.NODE_ENV !== 'production',
-            port: 8001,
+        DevtoolsModule.registerAsync({
+            imports: [SharedConfigModule],
+            useFactory: (configService: ConfigService) => ({
+                http: configService.get('NODE_ENV') !== 'production',
+                port: 8001,
+            }),
+            inject: [ConfigService],
         }),
         ScheduleModule.forRoot(),
         SharedConfigModule,

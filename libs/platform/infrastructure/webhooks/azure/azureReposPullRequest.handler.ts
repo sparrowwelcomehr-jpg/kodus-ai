@@ -99,6 +99,7 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
     private async handlePullRequest(
         params: IWebhookEventParams,
     ): Promise<void> {
+        const { payload, event } = params;
         const prId = params.payload?.resource?.pullRequestId || 'UNKNOWN_PR_ID';
         const eventType = params.event;
         const repoName =
@@ -153,7 +154,8 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
                     await this.savePullRequestUseCase.execute(params);
                     if (
                         this.enqueueCodeReviewJobUseCase &&
-                        orgData?.organizationAndTeamData
+                        orgData?.organizationAndTeamData &&
+                        params?.payload?.resource?.status !== 'abandoned'
                     ) {
                         const jobId =
                             await this.enqueueCodeReviewJobUseCase.execute({
@@ -191,7 +193,10 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
                         });
                     }
 
-                    if (eventType === 'git.pullrequest.updated') {
+                    if (
+                        eventType === 'git.pullrequest.updated' &&
+                        params?.payload?.resource?.status !== 'abandoned'
+                    ) {
                         try {
                             if (orgData?.organizationAndTeamData) {
                                 await this.enqueueImplementationCheckUseCase.execute(
@@ -207,7 +212,10 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
                                             params.payload?.resource
                                                 ?.lastMergeSourceCommit
                                                 ?.commitId,
-                                        trigger: 'synchronize',
+                                        payload: payload,
+                                        event: event,
+                                        platformType: PlatformType.AZURE_REPOS,
+                                        trigger: payload?.action,
                                     },
                                 );
                             }

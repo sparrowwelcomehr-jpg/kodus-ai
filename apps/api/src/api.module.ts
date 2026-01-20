@@ -69,11 +69,16 @@ import { TokenUsageController } from './controllers/tokenUsage.controller';
 import { UsersController } from './controllers/user.controller';
 import { CronModule } from './cron/cron.module';
 
+import { ConfigService } from '@nestjs/config';
+
 @Module({
     imports: [
-        DevtoolsModule.register({
-            http: process.env.NODE_ENV !== 'production',
-            port: 8000,
+        DevtoolsModule.registerAsync({
+            inject: [ConfigService],
+            useFactory: (configService: ConfigService) => ({
+                http: configService.get('NODE_ENV') !== 'production',
+                port: 8000,
+            }),
         }),
         SharedCoreModule,
         SharedConfigModule,
