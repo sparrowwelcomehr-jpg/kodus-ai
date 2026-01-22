@@ -6,7 +6,8 @@
     "license": "UNLICENSED",
     "scripts": {
         "analyze-pr": "ts-node scripts/analyze-pr-performance.cli.ts",
-        "pr-report": "npx ts-node scripts/pr-performance-report.cli.ts --env=.env.prod",
+        "check-pr-errors": "ts-node scripts/check-pr-errors.cli.ts",
+        "pr-report": "ts-node scripts/pr-performance-report.cli.ts",
         "setup": "./scripts/dev/setup.sh",
         "dev:health-check": "./scripts/docker/health-check.sh",
         "dev:first-run": "yarn setup",

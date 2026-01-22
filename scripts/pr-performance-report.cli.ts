@@ -41,6 +41,7 @@ const outputArg = args.find(a => a.startsWith('--output='));
 const DAYS_BACK = daysArg ? parseInt(daysArg.split('=')[1], 10) : 7;
 const FORMAT = formatArg ? formatArg.split('=')[1] : 'console';
 const OUTPUT_PATH = outputArg ? outputArg.split('=')[1] : null;
+const INCLUDE_LEGACY = args.includes('--legacy');
 
 interface StageMetrics {
     stageName: string;
@@ -77,6 +78,16 @@ interface ModelMetrics {
     slowCallsCount: number; // calls > 60s
 }
 
+interface OrgMetrics {
+    organizationId: string;
+    prCount: number;
+    avgMs: number;
+    p75Ms: number;
+    p95Ms: number;
+    maxMs: number;
+    slowPRsCount: number; // PRs with calls > 60s
+}
+
 interface PipelineMetrics {
     totalPipelines: number;
     avgDurationMs: number;
@@ -95,6 +106,7 @@ interface ReportData {
     stages: StageMetrics[];
     llmCalls: LLMMetrics[];
     modelMetrics: ModelMetrics[];
+    orgMetrics: OrgMetrics[];
     slowestPRs: Array<{
         prNumber: number;
         repository: string;
@@ -157,14 +169,26 @@ function padLeft(str: string, len: number): string {
 }
 
 async function getStageMetrics(db: Db, startDate: Date, endDate: Date): Promise<StageMetrics[]> {
-    const stagesAgg = await db.collection('observability_logs_ts').aggregate([
-        {
-            $match: {
-                message: { $regex: /Stage.*completed in \d+ms/ },
-                component: 'PipelineExecutor',
-                timestamp: { $gte: startDate, $lte: endDate }
+    const matchStage = {
+        message: { $regex: /Stage.*completed in \d+ms/ },
+        component: 'PipelineExecutor',
+        timestamp: { $gte: startDate, $lte: endDate }
+    };
+
+    const pipeline: any[] = [
+        { $match: matchStage }
+    ];
+
+    if (INCLUDE_LEGACY) {
+        pipeline.push({
+            $unionWith: {
+                coll: 'observability_logs',
+                pipeline: [{ $match: matchStage }]
             }
-        },
+        });
+    }
+
+    pipeline.push(
         {
             $addFields: {
                 stageName: '$attributes.stage',
@@ -201,7 +225,9 @@ async function getStageMetrics(db: Db, startDate: Date, endDate: Date): Promise<
                 durations: 1
             }
         }
-    ]).toArray();
+    );
+
+    const stagesAgg = await db.collection('observability_logs_ts').aggregate(pipeline).toArray();
 
     // Calculate percentiles and sort by pipeline order
     const stageOrder = [
@@ -400,17 +426,89 @@ async function getModelMetrics(db: Db, startDate: Date, endDate: Date): Promise<
     });
 }
 
-async function getPipelineMetrics(db: Db, startDate: Date, endDate: Date): Promise<PipelineMetrics> {
-    const pipelineAgg = await db.collection('observability_logs_ts').aggregate([
+async function getOrgMetrics(db: Db, startDate: Date, endDate: Date): Promise<OrgMetrics[]> {
+    const orgAgg = await db.collection('observability_telemetry').aggregate([
         {
             $match: {
-                $or: [
-                    { message: { $regex: /Starting pipeline: CodeReviewPipeline/ } },
-                    { message: { $regex: /Finished pipeline: CodeReviewPipeline/ } }
-                ],
-                timestamp: { $gte: startDate, $lte: endDate }
+                timestamp: { $gte: startDate, $lte: endDate },
+                'attributes.prNumber': { $exists: true },
+                'attributes.organizationId': { $exists: true },
+                duration: { $gt: 0 }
             }
         },
+        {
+            $group: {
+                _id: {
+                    organizationId: '$attributes.organizationId',
+                    prNumber: '$attributes.prNumber',
+                    correlationId: '$correlationId'
+                },
+                maxCallDuration: { $max: '$duration' }
+            }
+        },
+        {
+            $group: {
+                _id: '$_id.organizationId',
+                prCount: { $sum: 1 },
+                avgMs: { $avg: '$maxCallDuration' },
+                maxMs: { $max: '$maxCallDuration' },
+                durations: { $push: '$maxCallDuration' },
+                slowPRsCount: {
+                    $sum: { $cond: [{ $gt: ['$maxCallDuration', 60000] }, 1, 0] }
+                }
+            }
+        },
+        {
+            $project: {
+                organizationId: '$_id',
+                prCount: 1,
+                avgMs: { $round: ['$avgMs', 0] },
+                maxMs: 1,
+                durations: 1,
+                slowPRsCount: 1
+            }
+        },
+        { $sort: { maxMs: -1 } },
+        { $limit: 15 }
+    ]).toArray();
+
+    return orgAgg.map((o: any) => {
+        const sortedDurations = (o.durations || []).sort((a: number, b: number) => a - b);
+        return {
+            organizationId: o.organizationId || 'unknown',
+            prCount: o.prCount,
+            avgMs: o.avgMs,
+            p75Ms: calculatePercentile(sortedDurations, 0.75),
+            p95Ms: calculatePercentile(sortedDurations, 0.95),
+            maxMs: o.maxMs,
+            slowPRsCount: o.slowPRsCount || 0
+        };
+    });
+}
+
+async function getPipelineMetrics(db: Db, startDate: Date, endDate: Date): Promise<PipelineMetrics> {
+    const matchStage = {
+        $or: [
+            { message: { $regex: /Starting pipeline: CodeReviewPipeline/ } },
+            { message: { $regex: /Finished pipeline: CodeReviewPipeline/ } }
+        ],
+        timestamp: { $gte: startDate, $lte: endDate }
+    };
+
+    const pipeline: any[] = [
+        { $match: matchStage }
+    ];
+
+    if (INCLUDE_LEGACY) {
+        pipeline.push({
+            $unionWith: {
+                coll: 'observability_logs',
+                pipeline: [{ $match: matchStage }]
+            }
+        });
+    }
+
+    pipeline.push(
         {
             $group: {
                 _id: '$attributes.pipelineId',
@@ -436,7 +534,9 @@ async function getPipelineMetrics(db: Db, startDate: Date, endDate: Date): Promi
                 durations: { $push: '$durationMs' }
             }
         }
-    ]).toArray();
+    );
+
+    const pipelineAgg = await db.collection('observability_logs_ts').aggregate(pipeline).toArray();
 
     if (pipelineAgg.length === 0) {
         return {
@@ -585,6 +685,26 @@ function generateConsoleReport(data: ReportData): string {
         }
     }
 
+    // Org Metrics
+    if (data.orgMetrics.length > 0) {
+        output += `\n${thinLine}\n`;
+        output += `SLOWEST ORGANIZATIONS (by max single LLM call)\n`;
+        output += `${thinLine}\n`;
+        output += padRight('OrgId', 40) + padLeft('PRs', 6) + padLeft('Avg', 10) + padLeft('P95', 10) + padLeft('Max', 10) + padLeft('Slow', 8) + '\n';
+        output += thinLine + '\n';
+
+        for (const org of data.orgMetrics) {
+            const highlight = org.maxMs > 600000 ? ' ⚠️' : ''; // > 10min
+            output += padRight(org.organizationId.substring(0, 39), 40) +
+                padLeft(String(org.prCount), 6) +
+                padLeft(formatDuration(org.avgMs), 10) +
+                padLeft(formatDuration(org.p95Ms), 10) +
+                padLeft(formatDuration(org.maxMs), 10) +
+                padLeft(String(org.slowPRsCount), 8) +
+                highlight + '\n';
+        }
+    }
+
     // Slowest PRs
     if (data.slowestPRs.length > 0) {
         output += `\n${thinLine}\n`;
@@ -662,6 +782,18 @@ function generateMarkdownReport(data: ReportData): string {
         }
     }
 
+    // Org Metrics
+    if (data.orgMetrics.length > 0) {
+        output += `\n## Slowest Organizations\n\n`;
+        output += `| OrgId | PRs | Avg | P95 | Max | Slow PRs |\n`;
+        output += `|-------|-----|-----|-----|-----|----------|\n`;
+
+        for (const org of data.orgMetrics) {
+            const highlight = org.maxMs > 600000 ? ' ⚠️' : '';
+            output += `| ${org.organizationId} | ${org.prCount} | ${formatDuration(org.avgMs)} | ${formatDuration(org.p95Ms)} | ${formatDuration(org.maxMs)}${highlight} | ${org.slowPRsCount} |\n`;
+        }
+    }
+
     // Slowest PRs
     if (data.slowestPRs.length > 0) {
         output += `\n## Slowest PRs\n\n`;
@@ -685,11 +817,12 @@ async function generateReport(db: Db): Promise<ReportData> {
 
     console.error(`Fetching data from ${startDate.toISOString()} to ${endDate.toISOString()}...`);
 
-    const [pipeline, stages, llmCalls, modelMetrics, slowestPRs] = await Promise.all([
+    const [pipeline, stages, llmCalls, modelMetrics, orgMetrics, slowestPRs] = await Promise.all([
         getPipelineMetrics(db, startDate, endDate),
         getStageMetrics(db, startDate, endDate),
         getLLMMetrics(db, startDate, endDate),
         getModelMetrics(db, startDate, endDate),
+        getOrgMetrics(db, startDate, endDate),
         getSlowestPRs(db, startDate, endDate, 15)
     ]);
 
@@ -702,6 +835,7 @@ async function generateReport(db: Db): Promise<ReportData> {
         stages,
         llmCalls,
         modelMetrics,
+        orgMetrics,
         slowestPRs
     };
 }
@@ -719,12 +853,13 @@ Options:
   --days=<number>    Number of days to analyze (default: 7)
   --format=<type>    Output format: console, markdown, json (default: console)
   --output=<path>    Output file path (optional)
+  --legacy           Also search in legacy collection (observability_logs)
   --help             Show this help message
 
 Examples:
   npx ts-node scripts/pr-performance-report.cli.ts --env=.env.prod
   npx ts-node scripts/pr-performance-report.cli.ts --env=.env.prod --days=14 --format=markdown
-  npx ts-node scripts/pr-performance-report.cli.ts --env=.env.prod --format=json --output=report.json
+  npx ts-node scripts/pr-performance-report.cli.ts --env=.env.prod --legacy
 `);
         process.exit(0);
     }

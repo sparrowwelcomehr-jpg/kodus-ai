@@ -107,11 +107,24 @@ function truncate(str: string, len: number): string {
     return str.length <= len ? str : str.substring(0, len - 3) + '...';
 }
 
+// Helper to find in log collections (optionally include legacy)
+async function findOneInLogs(db: Db, query: any, options?: any, includeLegacy: boolean = false): Promise<any> {
+    const logsTs = db.collection('observability_logs_ts');
+
+    let result = await logsTs.findOne(query, options);
+    if (!result && includeLegacy) {
+        const logs = db.collection('observability_logs');
+        result = await logs.findOne(query, options);
+    }
+    return result;
+}
+
 async function analyzePR(
     db: Db,
     prNumber: number,
     repoFullName?: string,
-    daysBack: number = 7
+    daysBack: number = 7,
+    includeLegacy: boolean = false
 ): Promise<AnalysisResult | null> {
     const start = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000);
     const end = new Date();
@@ -122,7 +135,6 @@ async function analyzePR(
     console.log(`Date range: ${start.toISOString()} - ${end.toISOString()}`);
     console.log(`${'='.repeat(70)}\n`);
 
-    const logsCollection = db.collection('observability_logs_ts');
     const telemetryCollection = db.collection('observability_telemetry');
 
     // Step 1: Find pipeline info
@@ -133,14 +145,14 @@ async function analyzePR(
         timestamp: { $gte: start, $lte: end }
     };
 
-    const prLog = await logsCollection.findOne(logQuery, {
+    const prLog = await findOneInLogs(db, logQuery, {
         projection: {
             timestamp: 1,
             correlationId: 1,
             'attributes.organizationAndTeamData': 1,
             'attributes.pipelineId': 1
         }
-    });
+    }, includeLegacy);
 
     if (!prLog) {
         console.log(`ERROR: No logs found for PR #${prNumber}`);
@@ -156,7 +168,7 @@ async function analyzePR(
     // Step 2: Find pipelineId
     console.log('\nStep 2: Finding pipelineId...\n');
 
-    const pipelineLog = await logsCollection.findOne({
+    const pipelineLog = await findOneInLogs(db, {
         component: 'PipelineExecutor',
         message: { $regex: 'Starting pipeline: CodeReviewPipeline' },
         timestamp: {
@@ -169,12 +181,12 @@ async function analyzePR(
         ]
     }, {
         projection: { 'attributes.pipelineId': 1, timestamp: 1 }
-    });
+    }, includeLegacy);
 
     let pipelineId = (pipelineLog as any)?.attributes?.pipelineId;
 
     if (!pipelineId) {
-        const altLog = await logsCollection.findOne({
+        const altLog = await findOneInLogs(db, {
             'attributes.pipelineId': { $exists: true },
             timestamp: {
                 $gte: new Date(prLog.timestamp.getTime() - 60000),
@@ -184,7 +196,7 @@ async function analyzePR(
                 { 'attributes.organizationAndTeamData.teamId': teamId },
                 { message: { $regex: `PR#${prNumber}` } }
             ]
-        });
+        }, undefined, includeLegacy);
         pipelineId = (altLog as any)?.attributes?.pipelineId;
     }
 
@@ -196,15 +208,27 @@ async function analyzePR(
     console.log(`Found pipelineId: ${pipelineId}`);
 
     // Step 3: Get stage times
-    console.log('\nStep 3: Getting stage times...\n');
+    console.log(`\nStep 3: Getting stage times${includeLegacy ? ' (including legacy)' : ''}...\n`);
 
-    const stagesAgg = await logsCollection.aggregate([
-        {
-            $match: {
-                'attributes.pipelineId': pipelineId,
-                message: { $regex: 'Stage.*completed' }
+    const stageMatchQuery = {
+        'attributes.pipelineId': pipelineId,
+        message: { $regex: 'Stage.*completed' }
+    };
+
+    const stagePipeline: any[] = [
+        { $match: stageMatchQuery }
+    ];
+
+    if (includeLegacy) {
+        stagePipeline.push({
+            $unionWith: {
+                coll: 'observability_logs',
+                pipeline: [{ $match: stageMatchQuery }]
             }
-        },
+        });
+    }
+
+    stagePipeline.push(
         {
             $addFields: {
                 stageName: '$attributes.stage',
@@ -230,7 +254,9 @@ async function analyzePR(
             }
         },
         { $sort: { timestamp: 1 } }
-    ]).toArray();
+    );
+
+    const stagesAgg = await db.collection('observability_logs_ts').aggregate(stagePipeline).toArray();
 
     const stages: StageData[] = stagesAgg as StageData[];
 
@@ -400,19 +426,21 @@ async function main() {
 PR Performance Analysis CLI
 
 Usage:
-  npx ts-node scripts/analyze-pr-performance.cli.ts <prNumber> [repoFullName] [--days=7]
+  npx ts-node scripts/analyze-pr-performance.cli.ts <prNumber> [repoFullName] [options]
 
 Arguments:
   prNumber      PR number to analyze (required)
   repoFullName  Repository full name, e.g., "LumeWeb/web" (optional)
+
+Options:
   --days=N      Number of days to search back (default: 7)
+  --legacy      Also search in legacy collection (observability_logs)
+  --env=PATH    Path to .env file
 
 Examples:
-  npx ts-node scripts/analyze-pr-performance.cli.ts 701 LumeWeb/web
-  npx ts-node scripts/analyze-pr-performance.cli.ts 723 LumeWeb/web --days=1
-
-Environment:
-  Uses MongoDB connection from .env file (API_MG_DB_* or MONGODB_URI)
+  npx ts-node scripts/analyze-pr-performance.cli.ts 701 LumeWeb/web --env=.env.prod
+  npx ts-node scripts/analyze-pr-performance.cli.ts 723 LumeWeb/web --days=1 --env=.env.prod
+  npx ts-node scripts/analyze-pr-performance.cli.ts 723 --legacy --env=.env.prod
 `);
         process.exit(0);
     }
@@ -426,6 +454,7 @@ Environment:
     const repoFullName = args.find(a => !a.startsWith('--') && a !== args[0]);
     const daysArg = args.find(a => a.startsWith('--days='));
     const daysBack = daysArg ? parseInt(daysArg.split('=')[1], 10) : 7;
+    const includeLegacy = args.includes('--legacy');
 
     let client: MongoClient | null = null;
 
@@ -440,7 +469,7 @@ Environment:
 
         const db = client.db(dbName);
 
-        await analyzePR(db, prNumber, repoFullName, daysBack);
+        await analyzePR(db, prNumber, repoFullName, daysBack, includeLegacy);
     } catch (error) {
         console.error('ERROR:', error);
         process.exit(1);
