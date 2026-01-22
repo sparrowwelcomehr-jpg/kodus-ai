@@ -26,6 +26,7 @@ import { BitbucketPullRequestHandler } from '../infrastructure/webhooks/bitbucke
 import { PlatformCoreModule } from './platform-core.module';
 import { GetConnectionsUseCase } from '../application/use-cases/integrations/get-connections.use-case';
 import { GetOrganizationLanguageUseCase } from '../application/use-cases/organization/get-organization-language.use-case';
+import { WebhookContextService } from '../application/services/webhook-context.service';
 
 import { AutomationModule } from '@libs/automation/modules/automation.module';
 import { KodyRulesModule } from '@libs/kodyRules/modules/kodyRules.module';
@@ -60,6 +61,7 @@ import { WorkflowModule } from '@libs/core/workflow/modules/workflow.module';
         ...CodeManagementUseCases,
         GetConnectionsUseCase,
         GetOrganizationLanguageUseCase,
+        WebhookContextService,
         AzureReposPullRequestHandler,
         GitHubPullRequestHandler,
         GitLabMergeRequestHandler,

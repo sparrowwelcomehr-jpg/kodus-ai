@@ -9,6 +9,7 @@ import {
 import { IJobProcessorService } from '@libs/core/workflow/domain/contracts/job-processor.service.contract';
 import { ErrorClassification } from '@libs/core/workflow/domain/enums/error-classification.enum';
 import { RunCodeReviewAutomationUseCase } from '@libs/ee/automation/runCodeReview.use-case';
+import { EnqueueCodeReviewJobInput } from '@libs/core/workflow/application/use-cases/enqueue-code-review-job.use-case';
 
 @Injectable()
 export class CodeReviewJobProcessorService implements IJobProcessorService {
@@ -28,9 +29,6 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
         }
 
         const correlationId = job.correlationId;
-        if (!correlationId) {
-            throw new Error(`Job ${jobId} missing correlationId`);
-        }
 
         this.logger.log({
             message: `Processing Code Review Job ${jobId}`,
@@ -45,9 +43,21 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
             });
 
             const jobPayload = job.payload || {};
-            const { payload, event, platformType } = jobPayload as any;
+            const {
+                payload,
+                event,
+                platformType,
+                organizationAndTeamData,
+                teamAutomationId,
+            } = jobPayload as EnqueueCodeReviewJobInput;
 
-            if (!payload || !event || !platformType) {
+            if (
+                !payload ||
+                !event ||
+                !platformType ||
+                !organizationAndTeamData ||
+                !teamAutomationId
+            ) {
                 throw new Error('Invalid payload: missing required fields');
             }
 
@@ -55,14 +65,17 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
                 payload,
                 event,
                 platformType,
-                throwOnError: true,
+                correlationId,
+                organizationAndTeamData,
+                teamAutomationId,
             });
 
             await this.markCompleted(jobId);
 
             this.logger.log({
-                message: `Job ${jobId} completed successfully`,
+                message: `Job completed successfully`,
                 context: CodeReviewJobProcessorService.name,
+                metadata: { jobId, correlationId },
             });
         } catch (error) {
             if (error.name === 'WorkflowPausedError') {

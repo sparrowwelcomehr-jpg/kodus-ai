@@ -12,13 +12,14 @@ import { JobStatus } from '@libs/core/workflow/domain/enums/job-status.enum';
 import { WorkflowType } from '@libs/core/workflow/domain/enums/workflow-type.enum';
 import { OrganizationAndTeamData } from '@libs/core/infrastructure/config/types/general/organizationAndTeamData';
 
-export interface EnqueueCodeReviewJobInput {
+export type EnqueueCodeReviewJobInput = {
     payload: any;
     event: string;
     platformType: PlatformType;
-    organizationAndTeam: OrganizationAndTeamData;
+    organizationAndTeamData: OrganizationAndTeamData;
+    teamAutomationId: string;
     correlationId?: string;
-}
+};
 
 @Injectable()
 export class EnqueueCodeReviewJobUseCase implements IUseCase {
@@ -42,6 +43,7 @@ export class EnqueueCodeReviewJobUseCase implements IUseCase {
                     platformType: input.platformType,
                     repositoryId: input.payload.repositoryId,
                     pullRequestNumber: input.payload.pullRequestNumber,
+                    teamAutomationId: input.teamAutomationId,
                 },
             });
 
@@ -56,7 +58,8 @@ export class EnqueueCodeReviewJobUseCase implements IUseCase {
                 workflowType: WorkflowType.CODE_REVIEW,
                 handlerType: HandlerType.PIPELINE_SYNC,
                 payload: jobPayload,
-                organizationAndTeam: input.organizationAndTeam,
+                organizationAndTeamData: input.organizationAndTeamData,
+                teamAutomationId: input.teamAutomationId,
                 status: JobStatus.PENDING,
                 priority: 0,
                 retryCount: 0,

@@ -64,8 +64,8 @@ export class WorkflowJobQueueService implements IJobQueueService {
                             workflowType: job.workflowType,
                             handlerType: job.handlerType,
                             organizationId:
-                                job.organizationAndTeam?.organizationId,
-                            teamId: job.organizationAndTeam?.teamId,
+                                job.organizationAndTeamData?.organizationId,
+                            teamId: job.organizationAndTeamData?.teamId,
                         };
 
                         const messagePayload =

@@ -109,6 +109,7 @@ specs
 .cursor/rules/bmad/
 .cursor
 .specify
+.opencode
 .build_cache
 
 # ESLint Cache

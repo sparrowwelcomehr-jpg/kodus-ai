@@ -15,7 +15,8 @@ export interface IWorkflowJob {
     priority: number;
     retryCount: number;
     maxRetries: number;
-    organizationAndTeam?: OrganizationAndTeamData;
+    organizationAndTeamData?: OrganizationAndTeamData;
+    teamAutomationId?: string;
     errorClassification?: ErrorClassification;
     lastError?: string;
     scheduledAt?: Date;

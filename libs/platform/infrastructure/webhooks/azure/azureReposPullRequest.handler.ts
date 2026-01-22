@@ -13,7 +13,6 @@ import {
     IWebhookEventParams,
 } from '@libs/platform/domain/platformIntegrations/interfaces/webhook-event-handler.interface';
 import { CodeManagementService } from '../../adapters/services/codeManagement.service';
-import { RunCodeReviewAutomationUseCase } from '@libs/ee/automation/runCodeReview.use-case';
 import { SavePullRequestUseCase } from '@libs/platformData/application/use-cases/pullRequests/save.use-case';
 import { PullRequestClosedEvent } from '@libs/core/domain/events/pull-request-closed.event';
 import { EnqueueCodeReviewJobUseCase } from '@libs/core/workflow/application/use-cases/enqueue-code-review-job.use-case';
@@ -24,6 +23,7 @@ import {
     isKodyMentionNonReview,
     isReviewCommand,
 } from '@libs/common/utils/codeManagement/codeCommentMarkers';
+import { WebhookContextService } from '@libs/platform/application/services/webhook-context.service';
 
 @Injectable()
 export class AzureReposPullRequestHandler implements IWebhookEventHandler {
@@ -31,7 +31,7 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
 
     constructor(
         private readonly savePullRequestUseCase: SavePullRequestUseCase,
-        private readonly runCodeReviewAutomationUseCase: RunCodeReviewAutomationUseCase,
+        private readonly webhookContextService: WebhookContextService,
         private readonly chatWithKodyFromGitUseCase: ChatWithKodyFromGitUseCase,
         private readonly cacheService: CacheService,
         private readonly generateIssuesFromPrClosedUseCase: GenerateIssuesFromPrClosedUseCase,
@@ -121,31 +121,10 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
             name: params?.payload?.resource?.repository?.name,
             fullName: params?.payload?.resource?.repository?.name,
         } as any;
-
-        const mappedPlatform = getMappedPlatform(PlatformType.AZURE_REPOS);
-        if (!mappedPlatform) {
-            return;
-        }
-
-        const mappedUsers = mappedPlatform.mapUsers({
-            payload: params.payload,
-        });
-
-        const orgData =
-            await this.runCodeReviewAutomationUseCase.findTeamWithActiveCodeReview(
-                {
-                    repository: {
-                        id: repository.id,
-                        name: repository.name,
-                    },
-                    platformType: PlatformType.AZURE_REPOS,
-                    userGitId:
-                        mappedUsers?.user?.descriptor?.toString() ||
-                        mappedUsers?.user?.id?.toString() ||
-                        mappedUsers?.user?.uuid?.toString(),
-                    triggerCommentId: params.payload?.resource?.comment?.id,
-                },
-            );
+        const context = await this.webhookContextService.getContext(
+            PlatformType.AZURE_REPOS,
+            String(repository.id),
+        );
 
         try {
             switch (eventType) {
@@ -154,7 +133,7 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
                     await this.savePullRequestUseCase.execute(params);
                     if (
                         this.enqueueCodeReviewJobUseCase &&
-                        orgData?.organizationAndTeamData &&
+                        context.organizationAndTeamData &&
                         params?.payload?.resource?.status !== 'abandoned'
                     ) {
                         const jobId =
@@ -162,9 +141,10 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
                                 payload: params.payload,
                                 event: params.event,
                                 platformType: PlatformType.AZURE_REPOS,
-                                organizationAndTeam:
-                                    orgData.organizationAndTeamData,
+                                organizationAndTeamData:
+                                    context.organizationAndTeamData,
                                 correlationId: params.correlationId,
+                                teamAutomationId: context.teamAutomationId,
                             });
 
                         this.logger.log({
@@ -184,8 +164,9 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
                                 'Skipping code review job enqueue (missing org/team or enqueue use case)',
                             context: AzureReposPullRequestHandler.name,
                             metadata: {
+                                ...context,
                                 hasOrgAndTeam:
-                                    !!orgData?.organizationAndTeamData,
+                                    !!context.organizationAndTeamData,
                                 prId,
                                 repoName,
                                 repositoryId: repository.id,
@@ -198,11 +179,11 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
                         params?.payload?.resource?.status !== 'abandoned'
                     ) {
                         try {
-                            if (orgData?.organizationAndTeamData) {
+                            if (context.organizationAndTeamData) {
                                 await this.enqueueImplementationCheckUseCase.execute(
                                     {
                                         organizationAndTeamData:
-                                            orgData.organizationAndTeamData,
+                                            context.organizationAndTeamData,
                                         repository: {
                                             id: repository.id,
                                             name: repository.name,
@@ -237,13 +218,13 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
 
                     try {
                         if (params?.payload?.resource?.status === 'completed') {
-                            if (orgData?.organizationAndTeamData) {
+                            if (context.organizationAndTeamData) {
                                 const baseRefFull =
                                     params?.payload?.resource?.targetRefName; // refs/heads/main
                                 const defaultBranch =
                                     await this.codeManagement.getDefaultBranch({
                                         organizationAndTeamData:
-                                            orgData.organizationAndTeamData,
+                                            context.organizationAndTeamData,
                                         repository: {
                                             id: repository.id,
                                             name: repository.name,
@@ -256,7 +237,7 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
                                     await this.codeManagement.getFilesByPullRequestId(
                                         {
                                             organizationAndTeamData:
-                                                orgData.organizationAndTeamData,
+                                                context.organizationAndTeamData,
                                             repository: {
                                                 id: repository.id,
                                                 name: repository.name,
@@ -270,7 +251,7 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
                                 this.eventEmitter.emit(
                                     'pull-request.closed',
                                     new PullRequestClosedEvent(
-                                        orgData.organizationAndTeamData,
+                                        context.organizationAndTeamData,
                                         repository,
                                         params?.payload?.resource
                                             ?.pullRequestId,
@@ -289,7 +270,7 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
                                 eventType,
                                 repoName,
                                 organizationAndTeamData:
-                                    orgData?.organizationAndTeamData,
+                                    context.organizationAndTeamData,
                             },
                         });
                     }
@@ -313,7 +294,7 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
                     prId,
                     eventType,
                     repoName,
-                    organizationAndTeamData: orgData?.organizationAndTeamData,
+                    organizationAndTeamData: context.organizationAndTeamData,
                 },
                 message: `Successfully processed Azure Repos event '${eventType}' for PR ID: ${prId}`,
             });
@@ -325,7 +306,7 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
                     prId,
                     eventType,
                     repoName,
-                    organizationAndTeamData: orgData?.organizationAndTeamData,
+                    organizationAndTeamData: context.organizationAndTeamData,
                 },
                 message: `Error processing Azure Repos pull request #${prId}: ${error.message}`,
                 error,
@@ -355,25 +336,10 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
             return;
         }
 
-        const mappedUsers = mappedPlatform.mapUsers({
-            payload: params.payload,
-        });
-
-        const orgData =
-            await this.runCodeReviewAutomationUseCase.findTeamWithActiveCodeReview(
-                {
-                    repository: {
-                        id: repository.id,
-                        name: repository.name,
-                    },
-                    userGitId:
-                        mappedUsers?.user?.descriptor?.toString() ||
-                        mappedUsers?.user?.id?.toString() ||
-                        mappedUsers?.user?.uuid?.toString(),
-                    platformType: PlatformType.AZURE_REPOS,
-                    triggerCommentId: payload?.resource?.comment?.id,
-                },
-            );
+        const context = await this.webhookContextService.getContext(
+            PlatformType.AZURE_REPOS,
+            String(repository.id),
+        );
 
         try {
             // Extract comment data
@@ -451,13 +417,15 @@ export class AzureReposPullRequestHandler implements IWebhookEventHandler {
 
                 // Execute the necessary use cases
                 await this.savePullRequestUseCase.execute(updatedParams);
-                if (orgData?.organizationAndTeamData) {
+                if (context.organizationAndTeamData) {
                     await this.enqueueCodeReviewJobUseCase.execute({
                         payload: updatedParams.payload,
                         event: updatedParams.event,
                         platformType: PlatformType.AZURE_REPOS,
-                        organizationAndTeam: orgData.organizationAndTeamData,
+                        organizationAndTeamData:
+                            context.organizationAndTeamData,
                         correlationId: params.correlationId,
+                        teamAutomationId: context.teamAutomationId,
                     });
                 }
             }

@@ -57,6 +57,7 @@ export class CodeReviewHandlerService {
         action: string,
         executionId: string,
         triggerCommentId?: number | string,
+        userGitId?: string,
         workflowJobId?: string, // Optional: ID of workflow job (for pausing/resuming)
         lastExecutionData?: any, // Data from the last successful execution
     ) {
@@ -85,6 +86,7 @@ export class CodeReviewHandlerService {
                 action,
                 platformType: platformType as PlatformType,
                 triggerCommentId,
+                userGitId,
                 pipelineMetadata: {
                     lastExecution: lastExecutionData || null,
                 },

@@ -6,25 +6,16 @@ import {
     IPullRequestsService,
     PULL_REQUESTS_SERVICE_TOKEN,
 } from '@libs/platformData/domain/pullRequests/contracts/pullRequests.service.contracts';
-import { IntegrationConfigKey } from '@libs/core/domain/enums/Integration-config-key.enum';
 import { PlatformType } from '@libs/core/domain/enums/platform-type.enum';
-import {
-    IIntegrationConfigService,
-    INTEGRATION_CONFIG_SERVICE_TOKEN,
-} from '@libs/integrations/domain/integrationConfigs/contracts/integration-config.service.contracts';
 import { GenerateIssuesFromPrClosedUseCase } from '@libs/issues/application/use-cases/generate-issues-from-pr-closed.use-case';
 import { ChatWithKodyFromGitUseCase } from '@libs/platform/application/use-cases/codeManagement/chatWithKodyFromGit.use-case';
 import {
     IWebhookEventHandler,
     IWebhookEventParams,
 } from '@libs/platform/domain/platformIntegrations/interfaces/webhook-event-handler.interface';
-import {
-    IWebhookBitbucketPullRequestEvent,
-    stripCurlyBracesFromUUIDs,
-} from '@libs/platform/domain/platformIntegrations/types/webhooks/webhooks-bitbucket.type';
+import { IWebhookBitbucketPullRequestEvent } from '@libs/platform/domain/platformIntegrations/types/webhooks/webhooks-bitbucket.type';
 import { CodeManagementService } from '../../adapters/services/codeManagement.service';
 import { SavePullRequestUseCase } from '@libs/platformData/application/use-cases/pullRequests/save.use-case';
-import { RunCodeReviewAutomationUseCase } from '@libs/ee/automation/runCodeReview.use-case';
 import { getMappedPlatform } from '@libs/common/utils/webhooks';
 import {
     isKodyMentionNonReview,
@@ -33,6 +24,7 @@ import {
 import { PullRequestClosedEvent } from '@libs/core/domain/events/pull-request-closed.event';
 import { EnqueueCodeReviewJobUseCase } from '@libs/core/workflow/application/use-cases/enqueue-code-review-job.use-case';
 import { EnqueueImplementationCheckUseCase } from '@libs/code-review/application/use-cases/enqueue-implementation-check.use-case';
+import { WebhookContextService } from '@libs/platform/application/services/webhook-context.service';
 
 /**
  * Handler for Bitbucket webhook events.
@@ -42,12 +34,10 @@ import { EnqueueImplementationCheckUseCase } from '@libs/code-review/application
 export class BitbucketPullRequestHandler implements IWebhookEventHandler {
     private readonly logger = createLogger(BitbucketPullRequestHandler.name);
     constructor(
-        @Inject(INTEGRATION_CONFIG_SERVICE_TOKEN)
-        private readonly integrationConfigService: IIntegrationConfigService,
+        private readonly webhookContextService: WebhookContextService,
         @Inject(PULL_REQUESTS_SERVICE_TOKEN)
         private readonly pullRequestsService: IPullRequestsService,
         private readonly savePullRequestUseCase: SavePullRequestUseCase,
-        private readonly runCodeReviewAutomationUseCase: RunCodeReviewAutomationUseCase,
         private readonly chatWithKodyFromGitUseCase: ChatWithKodyFromGitUseCase,
         private readonly codeManagement: CodeManagementService,
         private readonly generateIssuesFromPrClosedUseCase: GenerateIssuesFromPrClosedUseCase,
@@ -114,31 +104,10 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
             fullName: payload?.repository?.full_name,
         } as any;
 
-        const mappedPlatform = getMappedPlatform(PlatformType.BITBUCKET);
-        if (!mappedPlatform) {
-            return;
-        }
-
-        const sanitizedPayload = stripCurlyBracesFromUUIDs(payload);
-
-        const mappedUsers = mappedPlatform.mapUsers({
-            payload: sanitizedPayload,
-        });
-
-        const orgData =
-            await this.runCodeReviewAutomationUseCase.findTeamWithActiveCodeReview(
-                {
-                    repository: {
-                        id: repository.id,
-                        name: repository.name,
-                    },
-                    platformType: PlatformType.BITBUCKET,
-                    userGitId:
-                        mappedUsers?.user?.id?.toString() ||
-                        mappedUsers?.user?.uuid?.toString(),
-                    triggerCommentId: payload.comment?.id,
-                },
-            );
+        const context = await this.webhookContextService.getContext(
+            PlatformType.BITBUCKET,
+            String(repository.id),
+        );
 
         try {
             // Check if we should trigger code review based on the PR event
@@ -153,14 +122,14 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
                     event === 'pullrequest:updated'
                 ) {
                     if (event === 'pullrequest:updated') {
-                        if (orgData?.organizationAndTeamData) {
+                        if (context.organizationAndTeamData) {
                             this.enqueueImplementationCheckUseCase
                                 .execute({
                                     payload: payload,
                                     event: event,
                                     platformType: PlatformType.BITBUCKET,
                                     organizationAndTeamData:
-                                        orgData.organizationAndTeamData,
+                                        context.organizationAndTeamData,
                                     repository: {
                                         id: repository.id,
                                         name: repository.name,
@@ -183,7 +152,7 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
                                             pullRequestNumber:
                                                 payload?.pullrequest?.id,
                                             organizationAndTeamData:
-                                                orgData.organizationAndTeamData,
+                                                context.organizationAndTeamData,
                                         },
                                     });
                                 });
@@ -192,16 +161,17 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
 
                     if (
                         this.enqueueCodeReviewJobUseCase &&
-                        orgData?.organizationAndTeamData
+                        context.organizationAndTeamData
                     ) {
                         this.enqueueCodeReviewJobUseCase
                             .execute({
                                 payload: params.payload,
                                 event: params.event,
                                 platformType: PlatformType.BITBUCKET,
-                                organizationAndTeam:
-                                    orgData.organizationAndTeamData,
+                                organizationAndTeamData:
+                                    context.organizationAndTeamData,
                                 correlationId: params.correlationId,
+                                teamAutomationId: context.teamAutomationId,
                             })
                             .then((jobId) => {
                                 this.logger.log({
@@ -225,7 +195,7 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
                                         prId,
                                         repositoryId: repository.id,
                                         organizationAndTeamData:
-                                            orgData.organizationAndTeamData,
+                                            context.organizationAndTeamData,
                                     },
                                 });
                             });
@@ -235,8 +205,9 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
                                 'Skipping code review job enqueue (missing org/team or enqueue use case)',
                             context: BitbucketPullRequestHandler.name,
                             metadata: {
+                                ...context,
                                 hasOrgAndTeam:
-                                    !!orgData?.organizationAndTeamData,
+                                    !!context.organizationAndTeamData,
                                 prId,
                                 repositoryId: repository.id,
                             },
@@ -255,14 +226,14 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
 
                     if (merged) {
                         try {
-                            if (orgData?.organizationAndTeamData) {
+                            if (context.organizationAndTeamData) {
                                 const baseRef =
                                     payload?.pullrequest?.destination?.branch
                                         ?.name;
                                 const defaultBranch =
                                     await this.codeManagement.getDefaultBranch({
                                         organizationAndTeamData:
-                                            orgData.organizationAndTeamData,
+                                            context.organizationAndTeamData,
                                         repository: {
                                             id: repository.id,
                                             name: repository.name,
@@ -275,7 +246,7 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
                                     await this.codeManagement.getFilesByPullRequestId(
                                         {
                                             organizationAndTeamData:
-                                                orgData.organizationAndTeamData,
+                                                context.organizationAndTeamData,
                                             repository: {
                                                 id: repository.id,
                                                 name: repository.name,
@@ -286,7 +257,7 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
                                 this.eventEmitter.emit(
                                     'pull-request.closed',
                                     new PullRequestClosedEvent(
-                                        orgData.organizationAndTeamData,
+                                        context.organizationAndTeamData,
                                         repository,
                                         payload?.pullrequest?.id,
                                         changedFiles || [],
@@ -301,7 +272,7 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
                                 error: e,
                                 metadata: {
                                     organizationAndTeamData:
-                                        orgData?.organizationAndTeamData,
+                                        context.organizationAndTeamData,
                                     repository,
                                     pullRequestNumber: payload?.pullrequest?.id,
                                 },
@@ -334,31 +305,10 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
             name: payload?.repository?.name,
         } as any;
 
-        const mappedPlatform = getMappedPlatform(PlatformType.BITBUCKET);
-        if (!mappedPlatform) {
-            return;
-        }
-
-        const sanitizedPayload = stripCurlyBracesFromUUIDs(payload);
-
-        const mappedUsers = mappedPlatform.mapUsers({
-            payload: sanitizedPayload,
-        });
-
-        const orgData =
-            await this.runCodeReviewAutomationUseCase.findTeamWithActiveCodeReview(
-                {
-                    repository: {
-                        id: repository.id,
-                        name: repository.name,
-                    },
-                    userGitId:
-                        mappedUsers?.user?.id?.toString() ||
-                        mappedUsers?.user?.uuid?.toString(),
-                    platformType: PlatformType.BITBUCKET,
-                    triggerCommentId: payload.comment?.id,
-                },
-            );
+        const context = await this.webhookContextService.getContext(
+            PlatformType.BITBUCKET,
+            String(repository.id),
+        );
 
         try {
             const mappedPlatform = getMappedPlatform(PlatformType.BITBUCKET);
@@ -420,13 +370,15 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
                 };
 
                 await this.savePullRequestUseCase.execute(updatedParams);
-                if (orgData?.organizationAndTeamData) {
+                if (context.organizationAndTeamData) {
                     await this.enqueueCodeReviewJobUseCase.execute({
                         payload: updatedParams.payload,
                         event: updatedParams.event,
                         platformType: PlatformType.BITBUCKET,
-                        organizationAndTeam: orgData.organizationAndTeamData,
+                        organizationAndTeamData:
+                            context.organizationAndTeamData,
                         correlationId: params.correlationId,
+                        teamAutomationId: context.teamAutomationId,
                     });
                 }
                 return;
@@ -472,14 +424,14 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
         const { pullrequest, repository } = payload;
         const repoId = repository.uuid.slice(1, repository.uuid.length - 1);
 
-        const configs =
-            await this.integrationConfigService.findIntegrationConfigWithTeams(
-                IntegrationConfigKey.REPOSITORIES,
-                repoId,
-                platformType,
-            );
+        const context = await this.webhookContextService.getContext(
+            platformType,
+            repoId,
+        );
 
-        if (!configs || !configs?.length) {
+        const organizationAndTeamData = context?.organizationAndTeamData;
+
+        if (!organizationAndTeamData) {
             this.logger.debug({
                 message: `No integration configs found for repository ${repository.name} (${repoId})`,
                 context: BitbucketPullRequestHandler.name,
@@ -493,11 +445,6 @@ export class BitbucketPullRequestHandler implements IWebhookEventHandler {
             });
             return false;
         }
-
-        const organizationAndTeamData = configs.map((config) => ({
-            organizationId: config.team.organization.uuid,
-            teamId: config.team.uuid,
-        }))[0];
 
         if (event === 'pullrequest:updated') {
             try {

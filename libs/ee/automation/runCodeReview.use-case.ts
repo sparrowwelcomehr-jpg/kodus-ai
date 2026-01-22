@@ -1,69 +1,30 @@
-import { BYOKConfig } from '@kodus/kodus-common/llm';
-
 import {
     ITeamAutomationService,
     TEAM_AUTOMATION_SERVICE_TOKEN,
 } from '@libs/automation/domain/teamAutomation/contracts/team-automation.service';
 import { AutomationType } from '@libs/automation/domain/automation/enum/automation-type';
 import {
-    GitHubReaction,
-    GitlabReaction,
-} from '@libs/code-review/domain/codeReviewFeedback/enums/codeReviewCommentReaction.enum';
-import {
     IIntegrationConfigService,
     INTEGRATION_CONFIG_SERVICE_TOKEN,
 } from '@libs/integrations/domain/integrationConfigs/contracts/integration-config.service.contracts';
-import {
-    IOrganizationParametersService,
-    ORGANIZATION_PARAMETERS_SERVICE_TOKEN,
-} from '@libs/organization/domain/organizationParameters/contracts/organizationParameters.service.contract';
-import {
-    IPullRequestsService,
-    PULL_REQUESTS_SERVICE_TOKEN,
-} from '@libs/platformData/domain/pullRequests/contracts/pullRequests.service.contracts';
-import { OrganizationParametersAutoAssignConfig } from '@libs/organization/domain/organizationParameters/types/organizationParameters.types';
+
 import { stripCurlyBracesFromUUIDs } from '@libs/platform/domain/platformIntegrations/types/webhooks/webhooks-bitbucket.type';
-import { CodeManagementService } from '@libs/platform/infrastructure/adapters/services/codeManagement.service';
-import { AutoAssignLicenseUseCase } from '@libs/ee/license/use-cases/auto-assign-license.use-case';
 import {
     EXECUTE_AUTOMATION_SERVICE_TOKEN,
     IExecuteAutomationService,
 } from '@libs/automation/domain/automationExecution/contracts/execute.automation.service.contracts';
-import {
-    IntegrationConfigKey,
-    OrganizationParametersKey,
-    PlatformType,
-} from '@libs/core/domain/enums';
+import { PlatformType } from '@libs/core/domain/enums';
 import { IUseCase } from '@libs/core/domain/interfaces/use-case.interface';
 
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { Inject, Injectable } from '@nestjs/common';
 import { getMappedPlatform } from '@libs/common/utils/webhooks';
-import {
-    PermissionValidationService,
-    ValidationErrorType,
-} from '../shared/services/permissionValidation.service';
 import {
     AUTOMATION_SERVICE_TOKEN,
     IAutomationService,
 } from '@libs/automation/domain/automation/contracts/automation.service';
-import { OrganizationAndTeamData } from '@libs/core/infrastructure/config/types/general/organizationAndTeamData';
 import { createLogger } from '@kodus/flow';
-
-const ERROR_TO_MESSAGE_TYPE: Record<
-    ValidationErrorType,
-    'user' | 'general' | 'byok_required' | 'no_error'
-> = {
-    [ValidationErrorType.INVALID_LICENSE]: 'general',
-    [ValidationErrorType.USER_NOT_LICENSED]: 'user',
-    [ValidationErrorType.BYOK_REQUIRED]: 'byok_required',
-    [ValidationErrorType.PLAN_LIMIT_EXCEEDED]: 'general',
-    [ValidationErrorType.NOT_ERROR]: 'no_error',
-};
-
-const NO_LICENSE_REACTION_MAP = {
-    [PlatformType.GITHUB]: GitHubReaction.THUMBS_DOWN,
-    [PlatformType.GITLAB]: GitlabReaction.LOCK,
-};
+import { EnqueueCodeReviewJobInput } from '@libs/core/workflow/application/use-cases/enqueue-code-review-job.use-case';
+import { CodeManagementService } from '@libs/platform/infrastructure/adapters/services/codeManagement.service';
 
 @Injectable()
 export class RunCodeReviewAutomationUseCase implements IUseCase {
@@ -82,29 +43,18 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
         @Inject(EXECUTE_AUTOMATION_SERVICE_TOKEN)
         private readonly executeAutomation: IExecuteAutomationService,
 
-        private readonly codeManagement: CodeManagementService,
-
-        private readonly permissionValidationService: PermissionValidationService,
-        private readonly autoAssignLicenseUseCase: AutoAssignLicenseUseCase,
-
-        @Inject(ORGANIZATION_PARAMETERS_SERVICE_TOKEN)
-        private readonly organizationParametersService: IOrganizationParametersService,
-
-        @Inject(PULL_REQUESTS_SERVICE_TOKEN)
-        private readonly pullRequestsService: IPullRequestsService,
+        private readonly codeManagementService: CodeManagementService,
     ) {}
 
-    async execute(params: {
-        payload: any;
-        event: string;
-        platformType: PlatformType;
-        automationName?: string;
-        throwOnError?: boolean;
-    }) {
-        let organizationAndTeamData = null;
-
+    async execute(params: EnqueueCodeReviewJobInput) {
         try {
-            const { payload, event, platformType } = params;
+            const {
+                payload,
+                event,
+                platformType,
+                teamAutomationId,
+                organizationAndTeamData,
+            } = params;
 
             if (!this.shouldRunAutomation(payload, platformType)) {
                 return;
@@ -137,52 +87,28 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
                 return;
             }
 
-            const mappedUsers = mappedPlatform.mapUsers({
-                payload: sanitizedPayload,
-            });
+            // const mappedUsers = mappedPlatform.mapUsers({
+            //     payload: sanitizedPayload,
+            // });
 
             let pullRequestData = null;
             const pullRequest = mappedPlatform.mapPullRequest({
                 payload: sanitizedPayload,
             });
 
-            const teamWithAutomation = await this.findTeamWithActiveCodeReview({
-                repository,
-                platformType,
-                userGitId:
-                    // in azure repos, the user id is the descriptor
-                    mappedUsers?.user?.descriptor?.toString() ||
-                    mappedUsers?.user?.id?.toString() ||
-                    mappedUsers?.user?.uuid?.toString(),
-                prNumber: pullRequest?.number,
-                triggerCommentId: sanitizedPayload?.triggerCommentId,
-            });
-
-            if (!teamWithAutomation) {
-                return;
-            }
-
-            const {
-                organizationAndTeamData: teamData,
-                automationId,
-                byokConfig,
-            } = teamWithAutomation;
-            organizationAndTeamData = teamData;
-
             if (!pullRequest) {
-                // try to get the PR details from the code management when it's a github issue
                 if (platformType === PlatformType.GITHUB) {
-                    pullRequestData = await this.codeManagement.getPullRequest({
-                        organizationAndTeamData,
-                        repository: {
-                            id: repository.id,
-                            name: repository.name,
-                        },
-                        prNumber: sanitizedPayload?.issue?.number,
-                    });
+                    pullRequestData =
+                        await this.codeManagementService.getPullRequest({
+                            organizationAndTeamData,
+                            repository: {
+                                id: repository.id,
+                                name: repository.name,
+                            },
+                            prNumber: sanitizedPayload?.issue?.number,
+                        });
                 }
 
-                // if it's still not possible to get the PR details, return
                 if (!pullRequestData) {
                     return;
                 }
@@ -199,16 +125,14 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
                         ref: apiPullRequest?.head?.ref,
                         sha: apiPullRequest?.head?.sha,
                         repo: {
-                            fullName:
-                                apiPullRequest?.head?.repo?.fullName,
+                            fullName: apiPullRequest?.head?.repo?.fullName,
                         },
                     },
                     base: {
                         ref: apiPullRequest?.base?.ref,
                         sha: apiPullRequest?.base?.sha,
                         repo: {
-                            fullName:
-                                apiPullRequest?.base?.repo?.fullName,
+                            fullName: apiPullRequest?.base?.repo?.fullName,
                             defaultBranch:
                                 apiPullRequest?.base?.repo?.defaultBranch,
                         },
@@ -237,13 +161,14 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
             ) {
                 repositoryData = {
                     ...repository,
-                    language: await this.codeManagement.getLanguageRepository({
-                        organizationAndTeamData,
-                        repository: {
-                            id: repository.id,
-                            name: repository.name,
-                        },
-                    }),
+                    language:
+                        await this.codeManagementService.getLanguageRepository({
+                            organizationAndTeamData,
+                            repository: {
+                                id: repository.id,
+                                name: repository.name,
+                            },
+                        }),
                 };
             }
 
@@ -263,7 +188,7 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
 
             const strategyParams = {
                 organizationAndTeamData,
-                teamAutomationId: automationId,
+                teamAutomationId: teamAutomationId,
                 repository: repositoryData,
                 pullRequest: pullRequestData,
                 branch: pullRequestData?.head?.ref,
@@ -271,28 +196,32 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
                 platformType: platformType,
                 origin: sanitizedPayload?.origin,
                 action,
-                byokConfig,
+                //TODO: prcisa do byokauu
+                //byokConfig,
                 triggerCommentId: sanitizedPayload?.triggerCommentId,
+                //userGitId,
             };
 
-            return await this.executeAutomation.executeStrategy(
+            const result = await this.executeAutomation.executeStrategy(
                 AutomationType.AUTOMATION_CODE_REVIEW,
                 strategyParams,
             );
+
+            return result;
         } catch (error) {
             this.logger.error({
                 message: 'Error executing code review automation',
                 context: RunCodeReviewAutomationUseCase.name,
                 error: error,
                 metadata: {
-                    automationName: params.automationName,
-                    teamId: organizationAndTeamData?.teamId,
+                    correlationId: params.correlationId,
+                    ...params.organizationAndTeamData,
                 },
             });
 
-            if (params.throwOnError) {
-                throw error;
-            }
+            // if (params.throwOnError) {
+            //     throw error;
+            // }
         }
     }
 
@@ -377,391 +306,5 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
         }
 
         return teamAutomations;
-    }
-
-    async findTeamWithActiveCodeReview(params: {
-        repository: { id: string; name: string };
-        platformType: PlatformType;
-        userGitId?: string;
-        prNumber?: number;
-        triggerCommentId?: string | number;
-    }): Promise<{
-        organizationAndTeamData: OrganizationAndTeamData;
-        automationId: string;
-        byokConfig?: BYOKConfig;
-    } | null> {
-        try {
-            if (!params?.repository?.id) {
-                return null;
-            }
-
-            let byokConfig: BYOKConfig | null = null;
-
-            const configs =
-                await this.integrationConfigService.findIntegrationConfigWithTeams(
-                    IntegrationConfigKey.REPOSITORIES,
-                    params.repository.id,
-                    params.platformType,
-                );
-
-            if (!configs?.length) {
-                this.logger.warn({
-                    message: 'No repository configuration found',
-                    context: RunCodeReviewAutomationUseCase.name,
-                    metadata: {
-                        repositoryName: params.repository?.name,
-                    },
-                });
-
-                return null;
-            }
-
-            const automation = await this.getAutomation();
-
-            for (const config of configs) {
-                const automations = await this.getTeamAutomations(
-                    automation.uuid,
-                    config.team.uuid,
-                );
-
-                if (!automations?.length) {
-                    this.logger.warn({
-                        message: `No automations configuration found. Organization: ${config?.team?.organization?.uuid} - Team: ${config?.team?.uuid}`,
-                        context: RunCodeReviewAutomationUseCase.name,
-                        metadata: {
-                            repositoryName: params.repository?.name,
-                            organizationAndTeamData: {
-                                organizationId:
-                                    config?.team?.organization?.uuid,
-                                teamId: config?.team?.uuid,
-                            },
-                            automationId: automation.uuid,
-                        },
-                    });
-                } else {
-                    const { organizationAndTeamData, automationId } = {
-                        organizationAndTeamData: {
-                            organizationId: config?.team?.organization?.uuid,
-                            teamId: config?.team?.uuid,
-                        },
-                        automationId: automations[0].uuid,
-                    };
-
-                    // Check if user is ignored BEFORE validation (to handle Trial licenses)
-                    const isIgnored = await this.isUserIgnored(
-                        organizationAndTeamData,
-                        params?.userGitId,
-                    );
-
-                    if (isIgnored) {
-                        this.logger.log({
-                            message: 'User is ignored, skipping automation',
-                            context: RunCodeReviewAutomationUseCase.name,
-                            metadata: {
-                                organizationAndTeamData,
-                                userGitId: params?.userGitId,
-                            },
-                        });
-                        return null;
-                    }
-
-                    // Validação centralizada de permissões usando PermissionValidationService
-                    const validationResult =
-                        await this.permissionValidationService.validateExecutionPermissions(
-                            organizationAndTeamData,
-                            params?.userGitId,
-                            RunCodeReviewAutomationUseCase.name,
-                        );
-
-                    if (
-                        !validationResult.allowed &&
-                        validationResult.errorType !==
-                            ValidationErrorType.NOT_ERROR
-                    ) {
-                        // If the user is not licensed but the company has licenses, we just add a reaction
-                        if (
-                            validationResult.errorType ===
-                            ValidationErrorType.USER_NOT_LICENSED
-                        ) {
-                            // Fetch user PR count for auto-assign check
-                            const userPrs = await this.pullRequestsService.find(
-                                {
-                                    'organizationId':
-                                        organizationAndTeamData.organizationId,
-                                    'user.id': params?.userGitId,
-                                } as any,
-                            );
-
-                            // Check if we can auto-assign or if it's a freebie
-                            const autoAssignResult =
-                                await this.autoAssignLicenseUseCase.execute({
-                                    organizationAndTeamData,
-                                    userGitId: params?.userGitId,
-                                    prNumber: params?.prNumber,
-                                    prCount: userPrs?.length ?? 0,
-                                    repositoryName: params?.repository?.name,
-                                    provider: params?.platformType,
-                                });
-
-                            if (autoAssignResult.shouldProceed) {
-                                this.logger.log({
-                                    message: `Proceeding with review after auto-assign check: ${autoAssignResult.reason}`,
-                                    context:
-                                        RunCodeReviewAutomationUseCase.name,
-                                    metadata: {
-                                        organizationAndTeamData,
-                                        userGitId: params?.userGitId,
-                                        reason: autoAssignResult.reason,
-                                    },
-                                });
-                            } else {
-                                this.logger.warn({
-                                    message:
-                                        'User not licensed but company has licenses',
-                                    context:
-                                        RunCodeReviewAutomationUseCase.name,
-                                    metadata: {
-                                        organizationAndTeamData,
-                                        repository: params?.repository,
-                                        prNumber: params?.prNumber,
-                                        userGitId: params?.userGitId,
-                                        autoAssignReason:
-                                            autoAssignResult.reason,
-                                    },
-                                });
-
-                                const shouldAddReaction =
-                                    autoAssignResult.reason !==
-                                        'IGNORED_USER' &&
-                                    autoAssignResult.reason !==
-                                        'NOT_ALLOWED_USER';
-
-                                if (shouldAddReaction) {
-                                    await this.addNoLicenseReaction({
-                                        organizationAndTeamData,
-                                        repository: params.repository,
-                                        prNumber: params.prNumber,
-                                        platformType: params.platformType,
-                                        triggerCommentId:
-                                            params.triggerCommentId,
-                                    });
-                                }
-
-                                return null;
-                            }
-                        } else {
-                            const noActiveSubscriptionType =
-                                validationResult.errorType
-                                    ? ERROR_TO_MESSAGE_TYPE[
-                                          validationResult.errorType
-                                      ]
-                                    : 'general';
-
-                            await this.createNoActiveSubscriptionComment({
-                                organizationAndTeamData,
-                                repository: params.repository,
-                                prNumber: params?.prNumber,
-                                noActiveSubscriptionType,
-                            });
-
-                            this.logger.warn({
-                                message: 'No active subscription found',
-                                context: RunCodeReviewAutomationUseCase.name,
-                                metadata: {
-                                    organizationAndTeamData,
-                                    repository: params?.repository,
-                                    prNumber: params?.prNumber,
-                                    userGitId: params?.userGitId,
-                                },
-                            });
-
-                            return null;
-                        }
-                    } else if (
-                        !validationResult.allowed &&
-                        validationResult.errorType ===
-                            ValidationErrorType.NOT_ERROR
-                    ) {
-                        return null;
-                    }
-
-                    // Se a validação passou, extrair byokConfig do resultado
-                    byokConfig = validationResult.byokConfig ?? null;
-
-                    return {
-                        organizationAndTeamData,
-                        automationId,
-                        byokConfig,
-                    };
-                }
-            }
-
-            return null;
-        } catch (error) {
-            this.logger.error({
-                message: 'Automation, Repository OR License not Active',
-                context: RunCodeReviewAutomationUseCase.name,
-                error: error,
-                metadata: {
-                    ...params,
-                },
-            });
-            throw new BadRequestException(error);
-        }
-    }
-
-    private async createNoActiveSubscriptionComment(params: {
-        organizationAndTeamData: OrganizationAndTeamData;
-        repository: { id: string; name: string };
-        prNumber: number;
-        noActiveSubscriptionType:
-            | 'user'
-            | 'general'
-            | 'byok_required'
-            | 'no_error';
-    }) {
-        if (params.noActiveSubscriptionType === 'no_error') {
-            return;
-        }
-
-        const repositoryPayload = {
-            id: params.repository.id,
-            name: params.repository.name,
-        };
-
-        let message = await this.noActiveSubscriptionGeneralMessage();
-
-        if (params.noActiveSubscriptionType === 'user') {
-            message = await this.noActiveSubscriptionForUser();
-        } else if (params.noActiveSubscriptionType === 'byok_required') {
-            message = await this.noBYOKConfiguredMessage(); // NOVO
-        }
-
-        await this.codeManagement.createIssueComment({
-            organizationAndTeamData: params.organizationAndTeamData,
-            repository: repositoryPayload,
-            prNumber: params?.prNumber,
-            body: message,
-        });
-
-        this.logger.log({
-            message: `No active subscription found for PR#${params?.prNumber}`,
-            context: RunCodeReviewAutomationUseCase.name,
-            metadata: {
-                organizationAndTeamData: params.organizationAndTeamData,
-                repository: repositoryPayload,
-                prNumber: params?.prNumber,
-            },
-        });
-
-        return;
-    }
-
-    private async noActiveSubscriptionGeneralMessage(): Promise<string> {
-        return (
-            '## Your trial has ended! 😢\n\n' +
-            'To keep getting reviews, activate your plan [here](https://app.kodus.io/settings/subscription).\n\n' +
-            'Got questions about plans or want to see if we can extend your trial? Talk to our founders [here](https://cal.com/gabrielmalinosqui/30min).😎\n\n' +
-            '<!-- kody-codereview -->'
-        );
-    }
-
-    private async noActiveSubscriptionForUser(): Promise<string> {
-        return (
-            '## User License not found! 😢\n\n' +
-            'To perform the review, ask the admin to add a subscription for your user in [subscription management](https://app.kodus.io/settings/subscription).\n\n' +
-            '<!-- kody-codereview -->'
-        );
-    }
-
-    private async noBYOKConfiguredMessage(): Promise<string> {
-        return (
-            '## BYOK Configuration Required! 🔑\n\n' +
-            'Your plan requires a Bring Your Own Key (BYOK) configuration to perform code reviews.\n\n' +
-            'Please configure your API keys in [Settings > BYOK Configuration](https://app.kodus.io/organization/byok).\n\n' +
-            '<!-- kody-codereview -->'
-        );
-    }
-
-    private async addNoLicenseReaction(params: {
-        organizationAndTeamData: OrganizationAndTeamData;
-        repository: { id: string; name: string };
-        prNumber: number;
-        platformType: PlatformType;
-        triggerCommentId?: string | number;
-    }) {
-        try {
-            if (params.platformType === PlatformType.AZURE_REPOS) {
-                return;
-            }
-
-            const reaction = NO_LICENSE_REACTION_MAP[params.platformType];
-            if (!reaction) {
-                return;
-            }
-
-            if (params.triggerCommentId) {
-                await this.codeManagement.addReactionToComment({
-                    organizationAndTeamData: params.organizationAndTeamData,
-                    repository: params.repository,
-                    prNumber: params.prNumber,
-                    commentId:
-                        typeof params.triggerCommentId === 'string'
-                            ? parseInt(params.triggerCommentId, 10)
-                            : params.triggerCommentId,
-                    reaction,
-                });
-            } else {
-                await this.codeManagement.addReactionToPR({
-                    organizationAndTeamData: params.organizationAndTeamData,
-                    repository: params.repository,
-                    prNumber: params.prNumber,
-                    reaction,
-                });
-            }
-        } catch (error) {
-            this.logger.error({
-                message: 'Error adding no license reaction',
-                context: RunCodeReviewAutomationUseCase.name,
-                error,
-                metadata: {
-                    ...params,
-                },
-            });
-        }
-    }
-
-    private async isUserIgnored(
-        organizationAndTeamData: OrganizationAndTeamData,
-        userGitId?: string,
-    ): Promise<boolean> {
-        if (!userGitId) {
-            return false;
-        }
-
-        const config = await this.organizationParametersService.findByKey(
-            OrganizationParametersKey.AUTO_LICENSE_ASSIGNMENT,
-            organizationAndTeamData,
-        );
-
-        const configValue =
-            config?.configValue as OrganizationParametersAutoAssignConfig;
-
-        if (
-            Array.isArray(configValue?.allowedUsers) &&
-            configValue.allowedUsers.length > 0 &&
-            !configValue.allowedUsers.includes(userGitId)
-        ) {
-            return true;
-        }
-
-        if (
-            configValue?.ignoredUsers?.length > 0 &&
-            configValue?.ignoredUsers.includes(userGitId)
-        ) {
-            return true;
-        }
-
-        return false;
     }
 }

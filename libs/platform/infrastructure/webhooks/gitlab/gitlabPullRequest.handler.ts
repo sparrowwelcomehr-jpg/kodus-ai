@@ -16,11 +16,11 @@ import {
     isKodyMentionNonReview,
     isReviewCommand,
 } from '@libs/common/utils/codeManagement/codeCommentMarkers';
-import { RunCodeReviewAutomationUseCase } from '@libs/ee/automation/runCodeReview.use-case';
 import { SavePullRequestUseCase } from '@libs/platformData/application/use-cases/pullRequests/save.use-case';
 import { PullRequestClosedEvent } from '@libs/core/domain/events/pull-request-closed.event';
 import { EnqueueCodeReviewJobUseCase } from '@libs/core/workflow/application/use-cases/enqueue-code-review-job.use-case';
 import { EnqueueImplementationCheckUseCase } from '@libs/code-review/application/use-cases/enqueue-implementation-check.use-case';
+import { WebhookContextService } from '@libs/platform/application/services/webhook-context.service';
 
 /**
  * Handler for GitLab webhook events.
@@ -31,7 +31,7 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
     private readonly logger = createLogger(GitLabMergeRequestHandler.name);
     constructor(
         private readonly savePullRequestUseCase: SavePullRequestUseCase,
-        private readonly runCodeReviewAutomationUseCase: RunCodeReviewAutomationUseCase,
+        private readonly webhookContextService: WebhookContextService,
         private readonly chatWithKodyFromGitUseCase: ChatWithKodyFromGitUseCase,
         private readonly generateIssuesFromPrClosedUseCase: GenerateIssuesFromPrClosedUseCase,
         private readonly eventEmitter: EventEmitter2,
@@ -46,7 +46,6 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
      * @returns True if this handler can process the event, false otherwise.
      */
     public canHandle(params: IWebhookEventParams): boolean {
-        console.log('params1111', params);
         return (
             params.platformType === PlatformType.GITLAB &&
             ['Merge Request Hook', 'Note Hook'].includes(params.event)
@@ -107,22 +106,10 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
             return;
         }
 
-        const mappedUsers = mappedPlatform.mapUsers({
-            payload: payload,
-        });
-
-        const orgData =
-            await this.runCodeReviewAutomationUseCase.findTeamWithActiveCodeReview(
-                {
-                    repository: {
-                        id: String(payload?.project?.id),
-                        name: payload?.project?.path,
-                    },
-                    platformType: PlatformType.GITLAB,
-                    userGitId: mappedUsers?.user?.id?.toString(),
-                    triggerCommentId: payload.comment?.id,
-                },
-            );
+        const context = await this.webhookContextService.getContext(
+            PlatformType.GITLAB,
+            String(payload?.project?.id),
+        );
 
         try {
             // Check if we should trigger code review based on the MR action
@@ -131,16 +118,17 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
 
                 if (
                     this.enqueueCodeReviewJobUseCase &&
-                    orgData?.organizationAndTeamData
+                    context.organizationAndTeamData
                 ) {
                     this.enqueueCodeReviewJobUseCase
                         .execute({
                             payload,
                             event: params.event,
                             platformType: PlatformType.GITLAB,
-                            organizationAndTeam:
-                                orgData.organizationAndTeamData,
+                            organizationAndTeamData:
+                                context.organizationAndTeamData,
                             correlationId: params.correlationId,
+                            teamAutomationId: context.teamAutomationId,
                         })
                         .then((jobId) => {
                             this.logger.log({
@@ -171,7 +159,7 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
                             'Skipping code review job enqueue (missing org/team or enqueue use case)',
                         context: GitLabMergeRequestHandler.name,
                         metadata: {
-                            hasOrgAndTeam: !!orgData?.organizationAndTeamData,
+                            hasOrgAndTeam: !!context.organizationAndTeamData,
                             mrNumber,
                             repositoryId: repository.id,
                         },
@@ -179,7 +167,7 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
                 }
 
                 if (this.isNewCommitUpdate(payload)) {
-                    if (orgData?.organizationAndTeamData) {
+                    if (context.organizationAndTeamData) {
                         this.enqueueImplementationCheckUseCase
                             .execute({
                                 repository: {
@@ -194,7 +182,7 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
                                 payload: payload,
                                 event: event,
                                 organizationAndTeamData:
-                                    orgData.organizationAndTeamData,
+                                    context.organizationAndTeamData,
                                 platformType: PlatformType.GITLAB,
                             })
                             .catch((e) => {
@@ -217,13 +205,13 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
                     this.generateIssuesFromPrClosedUseCase.execute(params);
 
                     try {
-                        if (orgData?.organizationAndTeamData) {
+                        if (context.organizationAndTeamData) {
                             const baseRef =
                                 payload?.object_attributes?.target_branch;
                             const defaultBranch =
                                 await this.codeManagement.getDefaultBranch({
                                     organizationAndTeamData:
-                                        orgData.organizationAndTeamData,
+                                        context.organizationAndTeamData,
                                     repository: {
                                         id: repository.id,
                                         name: repository.name,
@@ -236,7 +224,7 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
                                 await this.codeManagement.getFilesByPullRequestId(
                                     {
                                         organizationAndTeamData:
-                                            orgData.organizationAndTeamData,
+                                            context.organizationAndTeamData,
                                         repository: {
                                             id: repository.id,
                                             name: repository.name,
@@ -248,7 +236,7 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
                             this.eventEmitter.emit(
                                 'pull-request.closed',
                                 new PullRequestClosedEvent(
-                                    orgData.organizationAndTeamData,
+                                    context.organizationAndTeamData,
                                     repository,
                                     payload?.object_attributes?.iid,
                                     changedFiles || [],
@@ -299,7 +287,7 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
                 metadata: {
                     mrNumber,
                     mrUrl,
-                    organizationAndTeamData: orgData?.organizationAndTeamData,
+                    organizationAndTeamData: context.organizationAndTeamData,
                 },
                 message: `Error processing GitLab merge request #${mrNumber}: ${error.message}`,
                 error,
@@ -325,29 +313,14 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
             });
             return;
         }
-
-        const mappedUsers = mappedPlatform.mapUsers({
-            payload: payload,
-        });
-
-        const orgData =
-            await this.runCodeReviewAutomationUseCase.findTeamWithActiveCodeReview(
-                {
-                    repository: {
-                        id: String(payload?.project?.id),
-                        name: payload?.project?.path,
-                    },
-                    platformType: PlatformType.GITLAB,
-                    userGitId: mappedUsers?.user?.id?.toString(),
-                    triggerCommentId: payload.comment?.id,
-                },
-            );
+        const context = await this.webhookContextService.getContext(
+            PlatformType.GITLAB,
+            String(payload?.project?.id),
+        );
 
         try {
             // Verify if the action is create
             if (payload?.object_attributes?.action === 'create') {
-                // Extract comment data
-
                 const comment = mappedPlatform.mapComment({ payload });
                 if (!comment || !comment.body) {
                     this.logger.debug({
@@ -382,14 +355,15 @@ export class GitLabMergeRequestHandler implements IWebhookEventHandler {
                     };
 
                     await this.savePullRequestUseCase.execute(updatedParams);
-                    if (orgData?.organizationAndTeamData) {
+                    if (context.organizationAndTeamData) {
                         await this.enqueueCodeReviewJobUseCase.execute({
                             payload: updatedParams.payload,
                             event: updatedParams.event,
                             platformType: PlatformType.GITLAB,
-                            organizationAndTeam:
-                                orgData.organizationAndTeamData,
+                            organizationAndTeamData:
+                                context.organizationAndTeamData,
                             correlationId: params.correlationId,
+                            teamAutomationId: context.teamAutomationId,
                         });
                     }
                     return;

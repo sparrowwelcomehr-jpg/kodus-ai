@@ -17,10 +17,13 @@ import { ProcessFilesReview } from './stages/process-files-review.stage';
 import { ResolveConfigStage } from './stages/resolve-config.stage';
 import { ValidateConfigStage } from './stages/validate-config.stage';
 import { ValidateNewCommitsStage } from './stages/validate-new-commits.stage';
+import { ValidatePrerequisitesStage } from './stages/validate-prerequisites.stage';
 
 // EE Stages
 
 // Interfaces
+import { PermissionValidationModule } from '@libs/ee/shared/permission-validation.module';
+import { LicenseModule } from '@libs/ee/license/license.module';
 import { AIEngineModule } from '@libs/ai-engine/modules/ai-engine.module';
 import { AutomationModule } from '@libs/automation/modules/automation.module';
 import { WorkflowCoreModule } from '@libs/core/workflow/modules/workflow-core.module';
@@ -62,6 +65,8 @@ import { ImplementationVerificationProcessor } from '../workflow/implementation-
         forwardRef(() => KodyASTModule),
         forwardRef(() => AutomationModule),
         forwardRef(() => GithubModule),
+        forwardRef(() => PermissionValidationModule),
+        forwardRef(() => LicenseModule),
         WorkflowCoreModule,
         DryRunCoreModule,
     ],
@@ -75,6 +80,7 @@ import { ImplementationVerificationProcessor } from '../workflow/implementation-
 
         // Stages
         ValidateNewCommitsStage,
+        ValidatePrerequisitesStage,
         ResolveConfigStage,
         ValidateConfigStage,
         FetchChangedFilesStage,
@@ -120,6 +126,7 @@ import { ImplementationVerificationProcessor } from '../workflow/implementation-
         ResolveConfigStage,
         ValidateConfigStage,
         ValidateNewCommitsStage,
+        ValidatePrerequisitesStage,
         FetchChangedFilesStage,
         InitialCommentStage,
         AggregateResultsStage,

@@ -87,6 +87,7 @@ export class AutomationCodeReviewService implements Omit<
             origin,
             action,
             triggerCommentId,
+            userGitId,
         } = payload;
 
         let execution: IAutomationExecution | null = null;
@@ -158,6 +159,26 @@ export class AutomationCodeReviewService implements Omit<
                 return 'Could not create code review execution';
             }
 
+            // Check for pre-validation error passed from UseCase
+            if (payload.validationError) {
+                this.logger.warn({
+                    message: `Automation blocked by validation error: ${payload.validationError.errorType}`,
+                    context: AutomationCodeReviewService.name,
+                    metadata: {
+                        executionUuid: execution.uuid,
+                        validationError: payload.validationError,
+                    },
+                });
+
+                await this.updateAutomationExecution(
+                    execution,
+                    AutomationStatus.ERROR,
+                    `Blocked by validation: ${payload.validationError.errorType}`,
+                    this._buildExecutionData(payload),
+                );
+                return `Automation blocked: ${payload.validationError.errorType}`;
+            }
+
             // Fetch the last successful execution to pass to the handler
             const lastExecution =
                 await this.automationExecutionService.findLatestExecutionByFilters(
@@ -184,6 +205,7 @@ export class AutomationCodeReviewService implements Omit<
                     action,
                     execution.uuid,
                     triggerCommentId,
+                    userGitId,
                     undefined, // workflowJobId
                     lastExecution?.dataExecution, // Pass last execution data
                 );

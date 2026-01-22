@@ -58,6 +58,7 @@ export interface CodeReviewPipelineContext extends PipelineContext {
     action: string;
     platformType: PlatformType;
     triggerCommentId?: number | string;
+    userGitId?: string;
 
     codeReviewConfig?: CodeReviewConfig;
     automaticReviewStatus?: AutomaticReviewStatus;
