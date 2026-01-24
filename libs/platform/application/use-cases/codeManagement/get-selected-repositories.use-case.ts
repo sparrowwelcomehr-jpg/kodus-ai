@@ -61,8 +61,9 @@ export class GetSelectedRepositoriesUseCase implements IUseCase {
             let filteredRepositories = repositories;
 
             if (assignedRepositoryIds !== null) {
+                const assignedRepositoryIdsSet = new Set(assignedRepositoryIds);
                 filteredRepositories = filteredRepositories.filter((repo) =>
-                    assignedRepositoryIds.includes(repo.id),
+                    assignedRepositoryIdsSet.has(repo.id),
                 );
             }
 
