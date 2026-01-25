@@ -18,6 +18,7 @@ import { MCPManagerService } from '@/mcp-server/services/mcp-manager.service';
 import { LLM_ANALYSIS_SERVICE_TOKEN } from '@/code-review/infrastructure/adapters/services/llmAnalysis.service';
 import { KODY_RULES_ANALYSIS_SERVICE_TOKEN } from '@/ee/codeBase/kodyRulesAnalysis.service';
 import { CodeManagementService } from '@/platform/infrastructure/adapters/services/codeManagement.service';
+import { WebhookContextService } from '@/platform/application/services/webhook-context.service';
 
 // Mock definitions
 const PlatformType = { GITHUB: 'GITHUB' };
@@ -106,6 +107,7 @@ describe('PR Persistence Integration Test', () => {
     };
     const mockLLMAnalysisService = { analyzeCodeWithAI: jest.fn() };
     const mockKodyRulesAnalysisService = { analyzeCodeWithAI: jest.fn() };
+    const mockWebhookContextService = { getContext: jest.fn() };
 
     beforeAll(async () => {
         const module: TestingModule = await Test.createTestingModule({
@@ -164,6 +166,10 @@ describe('PR Persistence Integration Test', () => {
                 {
                     provide: KODY_RULES_ANALYSIS_SERVICE_TOKEN,
                     useValue: mockKodyRulesAnalysisService,
+                },
+                {
+                    provide: WebhookContextService,
+                    useValue: mockWebhookContextService,
                 },
             ],
         }).compile();

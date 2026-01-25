@@ -25,6 +25,8 @@ import {
 import { createLogger } from '@kodus/flow';
 import { EnqueueCodeReviewJobInput } from '@libs/core/workflow/application/use-cases/enqueue-code-review-job.use-case';
 import { CodeManagementService } from '@libs/platform/infrastructure/adapters/services/codeManagement.service';
+import { WebhookContextService } from '@libs/platform/application/services/webhook-context.service';
+import { OrganizationAndTeamData } from '@libs/core/infrastructure/config/types/general/organizationAndTeamData';
 
 @Injectable()
 export class RunCodeReviewAutomationUseCase implements IUseCase {
@@ -44,6 +46,8 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
         private readonly executeAutomation: IExecuteAutomationService,
 
         private readonly codeManagementService: CodeManagementService,
+
+        private readonly webhookContextService: WebhookContextService,
     ) {}
 
     async execute(params: EnqueueCodeReviewJobInput) {
@@ -306,5 +310,38 @@ export class RunCodeReviewAutomationUseCase implements IUseCase {
         }
 
         return teamAutomations;
+    }
+
+    async findTeamWithActiveCodeReview(params: {
+        repository: { id: string; name: string };
+        platformType: PlatformType;
+        userGitId?: string;
+        prNumber?: number;
+        triggerCommentId?: string | number;
+    }): Promise<{
+        organizationAndTeamData: OrganizationAndTeamData;
+        automationId: string;
+    } | null> {
+        const context = await this.webhookContextService.getContext(
+            params.platformType,
+            params.repository.id,
+        );
+
+        if (!context) {
+            this.logger.warn({
+                message: 'No active automation context found for repository',
+                context: RunCodeReviewAutomationUseCase.name,
+                metadata: {
+                    repository: params.repository,
+                    platformType: params.platformType,
+                },
+            });
+            return null;
+        }
+
+        return {
+            organizationAndTeamData: context.organizationAndTeamData,
+            automationId: context.teamAutomationId,
+        };
     }
 }
