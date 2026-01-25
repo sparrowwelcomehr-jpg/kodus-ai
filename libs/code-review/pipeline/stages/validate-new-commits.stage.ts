@@ -14,6 +14,7 @@ import {
     AutomationStatus,
 } from '@libs/automation/domain/automation/enum/automation-status';
 import { CodeReviewPipelineContext } from '../context/code-review-pipeline.context';
+import { Commit } from '@libs/core/infrastructure/config/types/general/commit.type';
 
 @Injectable()
 export class ValidateNewCommitsStage extends BasePipelineStage<CodeReviewPipelineContext> {
@@ -107,8 +108,14 @@ export class ValidateNewCommitsStage extends BasePipelineStage<CodeReviewPipelin
         // Filtrar commits novos localmente (após lastAnalyzedCommit)
         let newCommits = allCommits;
         if (lastAnalyzedCommit) {
+            // lastAnalyzedCommit pode ser um objeto {sha, author, ...} ou uma string
+            const lastCommitSha =
+                typeof lastAnalyzedCommit === 'string'
+                    ? lastAnalyzedCommit
+                    : (lastAnalyzedCommit as Commit).sha;
+
             const lastCommitIndex = allCommits.findIndex(
-                (commit) => commit.sha === lastAnalyzedCommit,
+                (commit) => commit.sha === lastCommitSha,
             );
             if (lastCommitIndex !== -1) {
                 newCommits = allCommits.slice(lastCommitIndex + 1);
