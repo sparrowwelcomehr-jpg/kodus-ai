@@ -14,10 +14,12 @@ import { MetricsCollectorService } from '@libs/core/infrastructure/metrics/metri
         },
         {
             provide: APP_FILTER,
-            useFactory: (metrics: MetricsCollectorService) => {
+            useFactory: (metrics?: MetricsCollectorService) => {
                 return new ExceptionsFilter(metrics);
             },
-            inject: [MetricsCollectorService],
+            inject: [
+                { token: MetricsCollectorService, optional: true },
+            ],
         },
         {
             provide: APP_INTERCEPTOR,
