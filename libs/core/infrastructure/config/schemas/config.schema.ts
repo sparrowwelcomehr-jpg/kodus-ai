@@ -15,4 +15,6 @@ export const configSchema = Joi.object({
     METRICS_ERROR_RATE_WINDOW_MINUTES: Joi.number().optional().default(5),
     REVIEW_RESPONSE_P95_THRESHOLD_MS: Joi.number().optional().default(600000),
     REVIEW_RESPONSE_P95_CRITICAL_MS: Joi.number().optional().default(1200000),
+    WEBHOOK_FAILURE_THRESHOLD_PERCENT: Joi.number().optional().default(10),
+    WEBHOOK_FAILURE_WINDOW_MINUTES: Joi.number().optional().default(30),
 });

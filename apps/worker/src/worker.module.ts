@@ -17,6 +17,7 @@ import { IncidentModule } from '@libs/core/infrastructure/incident/incident.modu
 import { MetricsModule } from '@libs/core/infrastructure/metrics/metrics.module';
 import { ErrorRateMonitorService } from '@libs/core/infrastructure/metrics/error-rate-monitor.service';
 import { ReviewResponseMonitorService } from '@libs/core/infrastructure/metrics/review-response-monitor.service';
+import { WebhookFailureMonitorService } from '@libs/core/infrastructure/metrics/webhook-failure-monitor.service';
 import { WorkflowModule } from '@libs/core/workflow/modules/workflow.module';
 import { OutboxRelayService } from '@libs/core/workflow/infrastructure/outbox-relay.service';
 import { ScheduleModule } from '@nestjs/schedule';
@@ -59,6 +60,7 @@ import { ConfigService } from '@nestjs/config';
         WorkerDrainService,
         ErrorRateMonitorService,
         ReviewResponseMonitorService,
+        WebhookFailureMonitorService,
     ],
 })
 export class WorkerModule {}
