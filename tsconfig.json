@@ -43,8 +43,6 @@
         "node_modules",
         "dist",
         "ormlogs.log",
-        "**/*.map",
-        "**/*.spec.ts",
-        "**/*.test.ts"
+        "**/*.map"
     ]
 }
