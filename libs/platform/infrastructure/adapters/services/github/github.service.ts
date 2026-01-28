@@ -2624,16 +2624,20 @@ export class GithubService
                 new Date(lastCommit.created_at),
         );
 
-        // 3. Iterate over the filtered commits and retrieve the differences
+        // 3. Fetch all commit diffs in parallel for better performance
         // Commits are sorted ascending by date, so later iterations overwrite
         // earlier entries, keeping the most recent version of each file.
-        for (const commit of newCommits) {
-            const { data: commitData } = await octokit.repos.getCommit({
-                owner: githubAuthDetail?.org,
-                repo: repository.name,
-                ref: commit.sha,
-            });
+        const commitDatas = await Promise.all(
+            newCommits.map((commit) =>
+                octokit.repos.getCommit({
+                    owner: githubAuthDetail?.org,
+                    repo: repository.name,
+                    ref: commit.sha,
+                }),
+            ),
+        );
 
+        for (const { data: commitData } of commitDatas) {
             const commitFiles = commitData.files || [];
             for (const file of commitFiles) {
                 filesMap.set(file.filename, file);

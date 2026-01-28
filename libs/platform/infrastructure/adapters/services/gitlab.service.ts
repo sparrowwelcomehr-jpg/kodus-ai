@@ -1478,11 +1478,14 @@ export class GitlabService implements Omit<
 
         // Commits are sorted ascending by date, so later iterations overwrite
         // earlier entries, keeping the most recent version of each file.
-        for (const commit of newCommits) {
-            const commitDiff = await gitlabAPI.Commits.showDiff(
-                repository.id,
-                commit.id,
-            );
+        // Fetch all commit diffs in parallel for better performance
+        const commitDiffs = await Promise.all(
+            newCommits.map((commit) =>
+                gitlabAPI.Commits.showDiff(repository.id, commit.id),
+            ),
+        );
+
+        for (const commitDiff of commitDiffs) {
             for (const file of commitDiff) {
                 filesMap.set(file.new_path, file);
             }
