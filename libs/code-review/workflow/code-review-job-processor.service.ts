@@ -10,6 +10,7 @@ import { IJobProcessorService } from '@libs/core/workflow/domain/contracts/job-p
 import { ErrorClassification } from '@libs/core/workflow/domain/enums/error-classification.enum';
 import { RunCodeReviewAutomationUseCase } from '@libs/ee/automation/runCodeReview.use-case';
 import { MetricsCollectorService } from '@libs/core/infrastructure/metrics/metrics-collector.service';
+import { EnqueueCodeReviewJobInput } from '@libs/core/workflow/application/use-cases/enqueue-code-review-job.use-case';
 
 @Injectable()
 export class CodeReviewJobProcessorService implements IJobProcessorService {
@@ -31,9 +32,6 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
         }
 
         const correlationId = job.correlationId;
-        if (!correlationId) {
-            throw new Error(`Job ${jobId} missing correlationId`);
-        }
 
         this.logger.log({
             message: `Processing Code Review Job ${jobId}`,
@@ -50,17 +48,31 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
             });
 
             const jobPayload = job.payload || {};
-            const { payload, event, platformType } = jobPayload as any;
+            const {
+                codeManagementPayload,
+                event,
+                platformType,
+                organizationAndTeamData,
+                teamAutomationId,
+            } = jobPayload as EnqueueCodeReviewJobInput;
 
-            if (!payload || !event || !platformType) {
+            if (
+                !codeManagementPayload ||
+                !event ||
+                !platformType ||
+                !organizationAndTeamData ||
+                !teamAutomationId
+            ) {
                 throw new Error('Invalid payload: missing required fields');
             }
 
             await this.runCodeReviewAutomationUseCase.execute({
-                payload,
+                codeManagementPayload,
                 event,
                 platformType,
-                throwOnError: true,
+                correlationId,
+                organizationAndTeamData,
+                teamAutomationId,
             });
 
             await this.markCompleted(jobId);
@@ -71,11 +83,6 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
                 durationMs,
                 { status: 'success' },
             );
-
-            this.logger.log({
-                message: `Job ${jobId} completed successfully`,
-                context: CodeReviewJobProcessorService.name,
-            });
         } catch (error) {
             if (error.name === 'WorkflowPausedError') {
                 await this.jobRepository.update(jobId, {

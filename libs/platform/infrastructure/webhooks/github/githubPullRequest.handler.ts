@@ -1,7 +1,6 @@
 import { createLogger } from '@kodus/flow';
 import { Injectable } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
-
 import { PlatformType } from '@libs/core/domain/enums/platform-type.enum';
 import { GenerateIssuesFromPrClosedUseCase } from '@libs/issues/application/use-cases/generate-issues-from-pr-closed.use-case';
 import { ChatWithKodyFromGitUseCase } from '@libs/platform/application/use-cases/codeManagement/chatWithKodyFromGit.use-case';
@@ -18,9 +17,9 @@ import {
     isReviewCommand,
 } from '@libs/common/utils/codeManagement/codeCommentMarkers';
 import { SavePullRequestUseCase } from '@libs/platformData/application/use-cases/pullRequests/save.use-case';
-import { RunCodeReviewAutomationUseCase } from '@libs/ee/automation/runCodeReview.use-case';
 import { PullRequestClosedEvent } from '@libs/core/domain/events/pull-request-closed.event';
 import { EnqueueImplementationCheckUseCase } from '@libs/code-review/application/use-cases/enqueue-implementation-check.use-case';
+import { WebhookContextService } from '@libs/platform/application/services/webhook-context.service';
 
 /**
  * Handler for GitHub webhook events.
@@ -31,7 +30,7 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
     private readonly logger = createLogger(GitHubPullRequestHandler.name);
     constructor(
         private readonly savePullRequestUseCase: SavePullRequestUseCase,
-        private readonly runCodeReviewAutomationUseCase: RunCodeReviewAutomationUseCase,
+        private readonly webhookContextService: WebhookContextService,
         private readonly chatWithKodyFromGitUseCase: ChatWithKodyFromGitUseCase,
         private readonly codeManagement: CodeManagementService,
         private readonly generateIssuesFromPrClosedUseCase: GenerateIssuesFromPrClosedUseCase,
@@ -103,6 +102,7 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
         const prNumber = payload?.pull_request?.number || payload?.number;
         const prUrl = payload?.pull_request?.html_url;
 
+        // TODO: melhorar log
         this.logger.log({
             context: GitHubPullRequestHandler.name,
             serviceName: GitHubPullRequestHandler.name,
@@ -119,24 +119,13 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
             fullName: payload?.repository?.full_name,
         };
 
-        const userGitId = payload?.sender?.id?.toString();
-
-        const validationResult =
-            await this.runCodeReviewAutomationUseCase.findTeamWithActiveCodeReview(
-                {
-                    repository: {
-                        id: String(payload?.repository?.id),
-                        name: payload?.repository?.name,
-                    },
-                    platformType: PlatformType.GITHUB,
-                    userGitId,
-                    prNumber: prNumber,
-                    triggerCommentId: payload?.comment?.id,
-                },
-            );
+        const context = await this.webhookContextService.getContext(
+            PlatformType.GITHUB,
+            String(payload?.repository?.id),
+        );
 
         // If no active automation found, complete the webhook processing immediately
-        if (!validationResult?.organizationAndTeamData) {
+        if (!context?.organizationAndTeamData) {
             this.logger.log({
                 message: `No active automation found for repository, completing webhook processing`,
                 context: GitHubPullRequestHandler.name,
@@ -155,12 +144,13 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
             if (this.enqueueCodeReviewJobUseCase) {
                 this.enqueueCodeReviewJobUseCase
                     .execute({
-                        payload: payload,
+                        codeManagementPayload: payload,
                         event: event,
                         platformType: PlatformType.GITHUB,
-                        organizationAndTeam:
-                            validationResult.organizationAndTeamData,
+                        organizationAndTeamData:
+                            context.organizationAndTeamData,
                         correlationId: params.correlationId,
+                        teamAutomationId: context.teamAutomationId,
                     })
                     .then((jobId) => {
                         this.logger.log({
@@ -171,6 +161,7 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
                                 jobId,
                                 prNumber,
                                 repositoryId: repository.id,
+                                ...context,
                             },
                         });
                     })
@@ -193,7 +184,7 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
                         payload: payload,
                         event: event,
                         organizationAndTeamData:
-                            validationResult.organizationAndTeamData,
+                            context.organizationAndTeamData,
                         repository: {
                             id: repository.id,
                             name: repository.name,
@@ -205,13 +196,12 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
                     })
                     .catch((e) => {
                         this.logger.error({
-                            message:
-                                'Failed to enqueue implementation check',
+                            message: 'Failed to enqueue implementation check',
                             context: GitHubPullRequestHandler.name,
                             error: e,
                             metadata: {
                                 organizationAndTeamData:
-                                    validationResult.organizationAndTeamData,
+                                    context.organizationAndTeamData,
                                 repository,
                                 pullRequestNumber:
                                     payload?.pull_request?.number,
@@ -232,7 +222,7 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
                         const defaultBranch =
                             await this.codeManagement.getDefaultBranch({
                                 organizationAndTeamData:
-                                    validationResult.organizationAndTeamData,
+                                    context.organizationAndTeamData,
                                 repository: {
                                     id: repository.id,
                                     name: repository.name,
@@ -243,21 +233,19 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
                         }
                         // fetch changed files
                         const changedFiles =
-                            await this.codeManagement.getFilesByPullRequestId(
-                                {
-                                    organizationAndTeamData:
-                                        validationResult.organizationAndTeamData,
-                                    repository: {
-                                        id: repository.id,
-                                        name: repository.name,
-                                    },
-                                    prNumber: payload?.pull_request?.number,
+                            await this.codeManagement.getFilesByPullRequestId({
+                                organizationAndTeamData:
+                                    context.organizationAndTeamData,
+                                repository: {
+                                    id: repository.id,
+                                    name: repository.name,
                                 },
-                            );
+                                prNumber: payload?.pull_request?.number,
+                            });
                         this.eventEmitter.emit(
                             'pull-request.closed',
                             new PullRequestClosedEvent(
-                                validationResult.organizationAndTeamData,
+                                context.organizationAndTeamData,
                                 repository,
                                 payload?.pull_request?.number,
                                 changedFiles || [],
@@ -270,7 +258,7 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
                             error: e,
                             metadata: {
                                 organizationAndTeamData:
-                                    validationResult.organizationAndTeamData,
+                                    context.organizationAndTeamData,
                                 repository,
                                 pullRequestNumber:
                                     payload?.pull_request?.number,
@@ -288,8 +276,7 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
                 metadata: {
                     prNumber,
                     prUrl,
-                    organizationAndTeamData:
-                        validationResult?.organizationAndTeamData,
+                    ...context,
                 },
                 message: `Error processing GitHub pull request #${prNumber}: ${error.message}`,
                 error,
@@ -366,18 +353,12 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
 
                     const userGitId = payload?.sender?.id?.toString();
 
-                    const validationResult =
-                        await this.runCodeReviewAutomationUseCase.findTeamWithActiveCodeReview(
-                            {
-                                repository,
-                                platformType: PlatformType.GITHUB,
-                                userGitId,
-                                prNumber: payload.issue.number,
-                                triggerCommentId: payload.comment?.id,
-                            },
-                        );
+                    const context = await this.webhookContextService.getContext(
+                        PlatformType.GITHUB,
+                        String(repository.id),
+                    );
 
-                    if (!validationResult?.organizationAndTeamData) {
+                    if (!context?.organizationAndTeamData) {
                         this.logger.warn({
                             message: `No active code review found for PR #${payload.issue.number} via command`,
                             context: GitHubPullRequestHandler.name,
@@ -390,10 +371,10 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
                         return;
                     }
 
-                    if (validationResult?.organizationAndTeamData) {
+                    if (context?.organizationAndTeamData) {
                         const data = await this.codeManagement.getPullRequest({
                             organizationAndTeamData:
-                                validationResult?.organizationAndTeamData,
+                                context.organizationAndTeamData,
                             repository,
                             prNumber: payload.issue.number,
                         });
@@ -467,15 +448,16 @@ export class GitHubPullRequestHandler implements IWebhookEventHandler {
 
                     if (
                         this.enqueueCodeReviewJobUseCase &&
-                        validationResult?.organizationAndTeamData
+                        context?.organizationAndTeamData
                     ) {
                         const jobId =
                             await this.enqueueCodeReviewJobUseCase.execute({
-                                payload: updatedParams.payload,
+                                codeManagementPayload: updatedParams.payload,
                                 event: event,
                                 platformType: PlatformType.GITHUB,
-                                organizationAndTeam:
-                                    validationResult.organizationAndTeamData,
+                                organizationAndTeamData:
+                                    context?.organizationAndTeamData,
+                                teamAutomationId: context.teamAutomationId,
                                 correlationId: params.correlationId,
                             });
 

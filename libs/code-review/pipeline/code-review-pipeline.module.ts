@@ -17,10 +17,13 @@ import { ProcessFilesReview } from './stages/process-files-review.stage';
 import { ResolveConfigStage } from './stages/resolve-config.stage';
 import { ValidateConfigStage } from './stages/validate-config.stage';
 import { ValidateNewCommitsStage } from './stages/validate-new-commits.stage';
+import { ValidatePrerequisitesStage } from './stages/validate-prerequisites.stage';
 
 // EE Stages
 
 // Interfaces
+import { PermissionValidationModule } from '@libs/ee/shared/permission-validation.module';
+import { LicenseModule } from '@libs/ee/license/license.module';
 import { AIEngineModule } from '@libs/ai-engine/modules/ai-engine.module';
 import { AutomationModule } from '@libs/automation/modules/automation.module';
 import { WorkflowCoreModule } from '@libs/core/workflow/modules/workflow-core.module';
@@ -46,6 +49,7 @@ import { LOAD_EXTERNAL_CONTEXT_STAGE_TOKEN } from './stages/contracts/loadExtern
 import { ValidateSuggestionsStage } from './stages/validate-suggestions.stage';
 import { CodeReviewPipelineStrategy } from './strategy/code-review-pipeline.strategy';
 import { ImplementationVerificationProcessor } from '../workflow/implementation-verification.processor';
+import { CodeReviewPipelineObserver } from '../infrastructure/observers/code-review-pipeline.observer';
 
 @Module({
     imports: [
@@ -62,6 +66,8 @@ import { ImplementationVerificationProcessor } from '../workflow/implementation-
         forwardRef(() => KodyASTModule),
         forwardRef(() => AutomationModule),
         forwardRef(() => GithubModule),
+        forwardRef(() => PermissionValidationModule),
+        forwardRef(() => LicenseModule),
         WorkflowCoreModule,
         DryRunCoreModule,
     ],
@@ -75,6 +81,7 @@ import { ImplementationVerificationProcessor } from '../workflow/implementation-
 
         // Stages
         ValidateNewCommitsStage,
+        ValidatePrerequisitesStage,
         ResolveConfigStage,
         ValidateConfigStage,
         FetchChangedFilesStage,
@@ -106,11 +113,15 @@ import { ImplementationVerificationProcessor } from '../workflow/implementation-
 
         // Implementation Verification
         ImplementationVerificationProcessor,
+
+        // Observers
+        CodeReviewPipelineObserver,
     ],
     exports: [
         CodeReviewPipelineStrategyEE,
         CodeReviewPipelineStrategy,
         CodeReviewJobProcessorService,
+        CodeReviewPipelineObserver,
         // Export stages if needed by tests or other modules
         CreateFileCommentsStage,
         CreatePrLevelCommentsStage,
@@ -120,6 +131,7 @@ import { ImplementationVerificationProcessor } from '../workflow/implementation-
         ResolveConfigStage,
         ValidateConfigStage,
         ValidateNewCommitsStage,
+        ValidatePrerequisitesStage,
         FetchChangedFilesStage,
         InitialCommentStage,
         AggregateResultsStage,

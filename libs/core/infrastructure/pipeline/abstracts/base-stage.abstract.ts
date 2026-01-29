@@ -2,11 +2,14 @@ import { produce } from 'immer';
 import { PipelineContext } from '../interfaces/pipeline-context.interface';
 import { PipelineStage } from '../interfaces/pipeline.interface';
 import { PipelineExecutor } from '../services/pipeline-executor.service';
+import { StageVisibility } from '../enums/stage-visibility.enum';
 
 export abstract class BasePipelineStage<
     TContext extends PipelineContext,
 > implements PipelineStage<TContext> {
     abstract stageName: string;
+    label?: string;
+    visibility: StageVisibility = StageVisibility.SECONDARY;
 
     async execute(context: TContext): Promise<TContext> {
         return await this.executeStage(context);

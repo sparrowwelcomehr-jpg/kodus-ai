@@ -30,6 +30,9 @@ export interface ICodeReviewExecutionRepository<T> {
 
     findManyByAutomationExecutionIds(
         uuids: string[],
+        options?: {
+            visibility?: string;
+        },
     ): Promise<CodeReviewExecutionEntity<T>[]>;
 
     delete(uuid: string): Promise<boolean>;

@@ -59,6 +59,7 @@ export interface CodeReviewPipelineContext extends PipelineContext {
     action: string;
     platformType: PlatformType;
     triggerCommentId?: number | string;
+    userGitId?: string;
 
     codeReviewConfig?: CodeReviewConfig;
     automaticReviewStatus?: AutomaticReviewStatus;
@@ -78,6 +79,9 @@ export interface CodeReviewPipelineContext extends PipelineContext {
 
     /** Arquivos filtrados COM conteúdo - após aplicar ignorePaths no FetchChangedFilesStage */
     changedFiles?: FileChange[];
+
+    /** List of files ignored by configuration patterns */
+    ignoredFiles?: string[];
 
     lastExecution?: {
         commentId?: any;
@@ -147,7 +151,7 @@ export interface CodeReviewPipelineContext extends PipelineContext {
 
     fileContextMap?: Record<string, FileContextAgentResult>;
 
-    correlationId: string;
+    correlationId?: string;
 }
 
 export interface FileContextAgentResult {

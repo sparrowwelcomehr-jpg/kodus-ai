@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { BasePipelineStage } from '@libs/core/infrastructure/pipeline/abstracts/base-stage.abstract';
+import { StageVisibility } from '@libs/core/infrastructure/pipeline/enums/stage-visibility.enum';
 import {
     COMMENT_MANAGER_SERVICE_TOKEN,
     ICommentManagerService,
@@ -22,6 +23,8 @@ import { createLogger } from '@kodus/flow';
 @Injectable()
 export class CreatePrLevelCommentsStage extends BasePipelineStage<CodeReviewPipelineContext> {
     readonly stageName = 'CreatePrLevelCommentsStage';
+    readonly label = 'Drafting Comments';
+    readonly visibility = StageVisibility.PRIMARY;
     private readonly logger = createLogger(CreatePrLevelCommentsStage.name);
 
     constructor(

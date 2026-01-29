@@ -37,6 +37,7 @@ import {
 import { EnrichedPullRequestsQueryDto } from '@libs/code-review/dtos/dashboard/enriched-pull-requests-query.dto';
 import { EnrichedPullRequestResponse } from '@libs/code-review/dtos/dashboard/enriched-pull-request-response.dto';
 import { Repositories } from '@libs/platform/domain/platformIntegrations/types/codeManagement/repositories.type';
+import { StageVisibility } from '@libs/core/infrastructure/pipeline/enums/stage-visibility.enum';
 
 @Injectable()
 export class GetEnrichedPullRequestsUseCase implements IUseCase {
@@ -257,7 +258,9 @@ export class GetEnrichedPullRequestsUseCase implements IUseCase {
                             return new Map<string, { sent: number; filtered: number }>();
                         }),
                     this.codeReviewExecutionService
-                        .findManyByAutomationExecutionIds(executionUuids)
+                        .findManyByAutomationExecutionIds(executionUuids, {
+                            visibility: StageVisibility.PRIMARY,
+                        })
                         .catch((error) => {
                             this.logger.error({
                                 message: 'Error bulk fetching code reviews',
@@ -321,12 +324,22 @@ export class GetEnrichedPullRequestsUseCase implements IUseCase {
                                 createdAt: cre.createdAt,
                                 updatedAt: cre.updatedAt,
                                 status: cre.status,
+                                stageName: cre.stageName,
+                                stageLabel:
+                                    (cre as any)?.metadata?.label ||
+                                    cre.stageName,
                                 message: cre.message,
+                                metadata: cre.metadata,
+                                finishedAt: cre.finishedAt,
                             }),
                         );
 
                         const enrichedData = this.extractEnrichedData(
                             execution.dataExecution,
+                        );
+                        const commitInfo = this.buildCommitInfo(
+                            pullRequest,
+                            execution,
                         );
 
                         // PERF: Use pre-computed counts from aggregation query
@@ -369,6 +382,10 @@ export class GetEnrichedPullRequestsUseCase implements IUseCase {
                                 name: pullRequest.user.name,
                             },
                             isDraft: pullRequest.isDraft,
+                            reviewedCommitSha: commitInfo.reviewedCommitSha,
+                            reviewedCommitUrl: commitInfo.reviewedCommitUrl,
+                            compareUrl: commitInfo.compareUrl,
+                            executionId: execution.uuid,
                             automationExecution: {
                                 uuid: execution.uuid,
                                 status: execution.status,
@@ -566,6 +583,79 @@ export class GetEnrichedPullRequestsUseCase implements IUseCase {
                   }
                 : undefined,
         };
+    }
+
+    private buildCommitInfo(
+        pullRequest: IPullRequests,
+        execution: any,
+    ): {
+        reviewedCommitSha?: string;
+        reviewedCommitUrl?: string;
+        compareUrl?: string;
+    } {
+        const lastAnalyzedCommit = execution?.dataExecution?.lastAnalyzedCommit;
+        const reviewedCommitSha =
+            typeof lastAnalyzedCommit === 'string'
+                ? lastAnalyzedCommit
+                : lastAnalyzedCommit?.sha ||
+                  lastAnalyzedCommit?.commitSha ||
+                  pullRequest?.commits?.[pullRequest.commits.length - 1]?.sha;
+
+        const repoUrl = pullRequest?.repository?.url;
+        const provider = pullRequest?.provider;
+        const reviewedCommitUrl = reviewedCommitSha
+            ? this.buildCommitUrl(provider, repoUrl, reviewedCommitSha)
+            : undefined;
+
+        const baseRef = pullRequest?.baseBranchRef;
+        const headRef = pullRequest?.headBranchRef;
+        const compareUrl =
+            repoUrl && baseRef && headRef
+                ? this.buildCompareUrl(provider, repoUrl, baseRef, headRef)
+                : undefined;
+
+        return { reviewedCommitSha, reviewedCommitUrl, compareUrl };
+    }
+
+    private buildCommitUrl(
+        provider: string,
+        repoUrl: string | undefined,
+        sha: string,
+    ) {
+        if (!repoUrl) return undefined;
+
+        switch ((provider || '').toLowerCase()) {
+            case 'gitlab':
+                return `${repoUrl}/-/commit/${sha}`;
+            case 'bitbucket':
+                return `${repoUrl}/commits/${sha}`;
+            case 'azure':
+            case 'azuredevops':
+                return `${repoUrl}/commit/${sha}`;
+            case 'github':
+            default:
+                return `${repoUrl}/commit/${sha}`;
+        }
+    }
+
+    private buildCompareUrl(
+        provider: string,
+        repoUrl: string,
+        baseRef: string,
+        headRef: string,
+    ) {
+        switch ((provider || '').toLowerCase()) {
+            case 'gitlab':
+                return `${repoUrl}/-/compare/${baseRef}...${headRef}`;
+            case 'bitbucket':
+                return `${repoUrl}/branches/compare/${headRef}%0D${baseRef}`;
+            case 'azure':
+            case 'azuredevops':
+                return `${repoUrl}/compare?base=${baseRef}&target=${headRef}`;
+            case 'github':
+            default:
+                return `${repoUrl}/compare/${baseRef}...${headRef}`;
+        }
     }
 
     private extractSuggestionsCount(pullRequest: IPullRequests): {

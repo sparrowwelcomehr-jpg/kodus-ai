@@ -64,16 +64,6 @@ export class EnqueueWebhookUseCase implements IUseCase {
             const correlationId =
                 input.correlationId || IdGenerator.correlationId();
 
-            this.logger.log({
-                message: 'Enqueuing raw webhook payload',
-                context: EnqueueWebhookUseCase.name,
-                metadata: {
-                    correlationId,
-                    platformType,
-                    event: input.event,
-                },
-            });
-
             await this.jobQueueService.enqueue({
                 correlationId,
                 workflowType: WorkflowType.WEBHOOK_PROCESSING,
@@ -87,16 +77,6 @@ export class EnqueueWebhookUseCase implements IUseCase {
                 priority: 0,
                 retryCount: 0,
                 maxRetries: 1,
-            });
-
-            this.logger.log({
-                message: 'Raw webhook payload enqueued successfully',
-                context: EnqueueWebhookUseCase.name,
-                metadata: {
-                    correlationId,
-                    platformType,
-                    event: input.event,
-                },
             });
         } catch (error) {
             this.logger.error({
