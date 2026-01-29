@@ -2618,11 +2618,11 @@ export class GithubService
 
         const sortedCommits = [...commits].sort(
             (a, b) =>
-                new Date(b.commit.author.date).getTime() -
-                new Date(a.commit.author.date).getTime(),
+                new Date(a.commit.author.date).getTime() -
+                new Date(b.commit.author.date).getTime(),
         );
 
-        const headSha = sortedCommits[0]?.sha;
+        const headSha = sortedCommits[sortedCommits?.length - 1]?.sha;
 
         if (!headSha || baseSha === headSha) {
             return [];

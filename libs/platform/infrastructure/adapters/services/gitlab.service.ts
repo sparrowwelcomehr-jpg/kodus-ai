@@ -1475,11 +1475,11 @@ export class GitlabService implements Omit<
 
         const sortedCommits = [...commits].sort(
             (a, b) =>
-                new Date(b.created_at).getTime() -
-                new Date(a.created_at).getTime(),
+                new Date(a.created_at).getTime() -
+                new Date(b.created_at).getTime(),
         );
 
-        const headSha = sortedCommits[0]?.id;
+        const headSha = sortedCommits[sortedCommits?.length - 1]?.id;
 
         if (!headSha || baseSha === headSha) {
             return [];
