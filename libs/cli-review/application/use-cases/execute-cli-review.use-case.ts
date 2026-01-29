@@ -29,6 +29,10 @@ import {
     AUTOMATION_EXECUTION_SERVICE_TOKEN,
 } from '@libs/automation/domain/automationExecution/contracts/automation-execution.service';
 import { IAutomationExecution } from '@libs/automation/domain/automationExecution/interfaces/automation-execution.interface';
+import {
+    ITeamAutomationService,
+    TEAM_AUTOMATION_SERVICE_TOKEN,
+} from '@libs/automation/domain/teamAutomation/contracts/team-automation.service';
 import { PlatformType } from '@libs/core/domain/enums/platform-type.enum';
 
 interface GitContext {
@@ -62,6 +66,8 @@ export class ExecuteCliReviewUseCase implements IUseCase {
         private readonly parametersService: IParametersService,
         @Inject(AUTOMATION_EXECUTION_SERVICE_TOKEN)
         private readonly automationExecutionService: IAutomationExecutionService,
+        @Inject(TEAM_AUTOMATION_SERVICE_TOKEN)
+        private readonly teamAutomationService: ITeamAutomationService,
     ) {}
 
     async execute(params: ExecuteCliReviewInput): Promise<CliReviewResponse> {
@@ -363,9 +369,17 @@ export class ExecuteCliReviewUseCase implements IUseCase {
         gitContext?: GitContext,
     ): Promise<IAutomationExecution | null> {
         try {
+            const teamAutomations = await this.teamAutomationService.find({
+                team: { uuid: organizationAndTeamData.teamId },
+                status: true,
+            });
+
             return await this.automationExecutionService.create({
                 status: AutomationStatus.IN_PROGRESS,
                 origin: 'cli',
+                ...(teamAutomations?.[0]?.uuid && {
+                    teamAutomation: { uuid: teamAutomations[0].uuid },
+                }),
                 dataExecution: {
                     type: 'CLI_REVIEW',
                     correlationId,
