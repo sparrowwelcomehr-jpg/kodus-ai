@@ -106,7 +106,7 @@ export class GitlabService implements Omit<
         private readonly configService: ConfigService,
         private readonly cacheService: CacheService,
         private readonly mcpManagerService?: MCPManagerService,
-    ) {}
+    ) { }
 
     async getPullRequestAuthors(params: {
         organizationAndTeamData: OrganizationAndTeamData;
@@ -621,7 +621,7 @@ export class GitlabService implements Omit<
                                     avatar_url: project.namespace?.avatar_url,
                                     organizationName: project.namespace?.name,
                                     visibility: (project?.visibility ===
-                                    'public'
+                                        'public'
                                         ? 'public'
                                         : 'private') as 'public' | 'private',
                                     selected:
@@ -664,7 +664,7 @@ export class GitlabService implements Omit<
                                     avatar_url: project.namespace?.avatar_url,
                                     organizationName: project.namespace?.name,
                                     visibility: (project?.visibility ===
-                                    'public'
+                                        'public'
                                         ? 'public'
                                         : 'private') as 'public' | 'private',
                                     selected:
@@ -1295,10 +1295,10 @@ export class GitlabService implements Omit<
                         const filesWithChanges = filters?.skipFiles
                             ? []
                             : await this.countChangesInMergeRequest(
-                                  gitlabAPI,
-                                  repo.id,
-                                  pullRequest.iid,
-                              );
+                                gitlabAPI,
+                                repo.id,
+                                pullRequest.iid,
+                            );
 
                         return {
                             id: pullRequest.id,
@@ -1495,18 +1495,30 @@ export class GitlabService implements Omit<
 
         const diffs = comparison.diffs || [];
 
-        return diffs.map((file) => {
-            const changeCount = this.countChanges(file.diff);
+        // 4. Get the MR diffs to filter out files that came from merge commits
+        // MergeRequests.allDiffs only returns files that belong to the MR (relative to target branch)
+        const mrDiffs = await gitlabAPI.MergeRequests.allDiffs(
+            repository.id,
+            prNumber,
+        );
 
-            return {
-                filename: file.new_path,
-                status: this.mapGitlabStatus(file),
-                additions: changeCount.adds,
-                deletions: changeCount.deletes,
-                changes: changeCount.adds + changeCount.deletes,
-                patch: file.diff,
-            };
-        });
+        const mrFileNames = new Set(mrDiffs.map((f) => f.new_path));
+
+        // 5. Keep only files that exist in both compare AND MR diffs list
+        return diffs
+            .filter((file) => mrFileNames.has(file.new_path))
+            .map((file) => {
+                const changeCount = this.countChanges(file.diff);
+
+                return {
+                    filename: file.new_path,
+                    status: this.mapGitlabStatus(file),
+                    additions: changeCount.adds,
+                    deletions: changeCount.deletes,
+                    changes: changeCount.adds + changeCount.deletes,
+                    patch: file.diff,
+                };
+            });
     }
 
     /*************  ✨ Codeium Command ⭐  *************/
@@ -1551,9 +1563,9 @@ export class GitlabService implements Omit<
             : '';
         const codeBlock = lineComment?.body?.improvedCode
             ? this.formatCodeBlock(
-                  repository?.language?.toLowerCase(),
-                  lineComment?.body?.improvedCode,
-              )
+                repository?.language?.toLowerCase(),
+                lineComment?.body?.improvedCode,
+            )
             : '';
         const suggestionContent = lineComment?.body?.suggestionContent || '';
         const actionStatement = lineComment?.body?.actionStatement
@@ -1581,7 +1593,7 @@ export class GitlabService implements Omit<
             copyPrompt,
             this.formatSub(translations.talkToKody),
             this.formatSub(translations.feedback) +
-                '<!-- kody-codereview -->&#8203;\n&#8203;',
+            '<!-- kody-codereview -->&#8203;\n&#8203;',
         ]
             .join('\n')
             .trim();
@@ -3181,8 +3193,8 @@ export class GitlabService implements Omit<
                         pr.state === GitlabPullRequestState.OPENED
                             ? PullRequestState.OPENED
                             : pr.state === GitlabPullRequestState.CLOSED
-                              ? PullRequestState.CLOSED
-                              : PullRequestState.ALL,
+                                ? PullRequestState.CLOSED
+                                : PullRequestState.ALL,
                     pull_number: pr.iid,
                     project_id: pr.project_id,
                     prURL: pr.web_url,
@@ -3245,7 +3257,7 @@ export class GitlabService implements Omit<
                     const firstDiscussionComment = discussion.notes[0];
                     const isDiscussionResolved: boolean =
                         firstDiscussionComment.resolved &&
-                        firstDiscussionComment.resolved === true
+                            firstDiscussionComment.resolved === true
                             ? true
                             : false;
 
@@ -3509,12 +3521,12 @@ export class GitlabService implements Omit<
         organizationAndTeamData: OrganizationAndTeamData;
         commentId: string;
         reason?:
-            | 'ABUSE'
-            | 'OFF_TOPIC'
-            | 'OUTDATED'
-            | 'RESOLVED'
-            | 'DUPLICATE'
-            | 'SPAM';
+        | 'ABUSE'
+        | 'OFF_TOPIC'
+        | 'OUTDATED'
+        | 'RESOLVED'
+        | 'DUPLICATE'
+        | 'SPAM';
     }): Promise<any | null> {
         throw new Error('Method not implemented.');
     }
