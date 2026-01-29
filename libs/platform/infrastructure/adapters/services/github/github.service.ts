@@ -124,15 +124,14 @@ interface GitHubInstallationData {
 @IntegrationServiceDecorator(PlatformType.GITHUB, 'codeManagement')
 export class GithubService
     implements
-        IGithubService,
-        Omit<
-            ICodeManagementService,
-            | 'getOrganizations'
-            | 'getUserById'
-            | 'getLanguageRepository'
-            | 'createSingleIssueComment'
-        >
-{
+    IGithubService,
+    Omit<
+        ICodeManagementService,
+        | 'getOrganizations'
+        | 'getUserById'
+        | 'getLanguageRepository'
+        | 'createSingleIssueComment'
+    > {
     private readonly MAX_RETRY_ATTEMPTS = 2;
     private readonly TTL = 50 * 60 * 1000; // 50 minutes
 
@@ -150,7 +149,7 @@ export class GithubService
         private readonly cacheService: CacheService,
         private readonly configService: ConfigService,
         private readonly mcpManagerService?: MCPManagerService,
-    ) {}
+    ) { }
 
     private async handleIntegration(
         integration: any,
@@ -2511,11 +2510,11 @@ export class GithubService
                         const files = filters?.skipFiles
                             ? []
                             : await this.getPullRequestFiles(
-                                  octokit,
-                                  githubAuthDetail.org,
-                                  repo,
-                                  pullRequest?.number,
-                              );
+                                octokit,
+                                githubAuthDetail.org,
+                                repo,
+                                pullRequest?.number,
+                            );
                         return {
                             id: pullRequest.id,
                             pull_number: pullRequest?.number,
@@ -2637,16 +2636,29 @@ export class GithubService
                 basehead: `${baseSha}...${headSha}`,
             });
 
-        const files = comparison.files || [];
+        const compareFiles = comparison.files || [];
 
-        return files.map((file) => ({
-            filename: file.filename,
-            status: file.status,
-            additions: file.additions,
-            deletions: file.deletions,
-            changes: file.changes,
-            patch: file.patch,
-        }));
+        // 4. Get the PR files list to filter out files that came from merge commits
+        // pulls.listFiles only returns files that belong to the PR (relative to base branch)
+        const prFiles = await octokit.paginate(octokit.pulls.listFiles, {
+            owner: githubAuthDetail?.org,
+            repo: repository.name,
+            pull_number: prNumber,
+        });
+
+        const prFileNames = new Set(prFiles.map((f) => f.filename));
+
+        // 5. Keep only files that exist in both compare AND PR file list
+        return compareFiles
+            .filter((file) => prFileNames.has(file.filename))
+            .map((file) => ({
+                filename: file.filename,
+                status: file.status,
+                additions: file.additions,
+                deletions: file.deletions,
+                changes: file.changes,
+                patch: file.patch,
+            }));
     }
 
     async getPullRequestsForRTTM(
@@ -2796,18 +2808,16 @@ ${copyPrompt}
         repository: any,
         translations: any,
         suggestionCopyPrompt: boolean,
+        isCommittableSuggestion?: boolean,
     ) {
-        const isCommittableSuggestion =
-            lineComment?.suggestion?.isCommittable &&
-            lineComment?.suggestion?.validatedCode;
         const improvedCode = isCommittableSuggestion
-            ? lineComment?.suggestion?.validatedCode
+            ? lineComment?.suggestion?.validatedData?.code
             : lineComment?.body?.improvedCode;
 
         const language = isCommittableSuggestion
             ? 'suggestion'
             : lineComment?.suggestion?.language?.toLowerCase() ||
-              repository?.language?.toLowerCase();
+            repository?.language?.toLowerCase();
 
         const severityShield = lineComment?.suggestion
             ? getSeverityLevelShield(lineComment.suggestion.severity)
@@ -2853,7 +2863,7 @@ This is an experimental feature that generates committable changes. Review the d
             copyPrompt,
             this.formatSub(translations.talkToKody),
             this.formatSub(translations.feedback) +
-                '<!-- kody-codereview -->&#8203;\n&#8203;',
+            '<!-- kody-codereview -->&#8203;\n&#8203;',
         ]
             .join('\n')
             .trim();
@@ -2881,11 +2891,28 @@ This is an experimental feature that generates committable changes. Review the d
             TranslationsCategory.ReviewComment,
         );
 
+        const { isCommittable, validatedData } = lineComment?.suggestion || {};
+
+        const isCommittableSuggestion =
+            isCommittable &&
+            validatedData &&
+            validatedData.code &&
+            validatedData.lineStart !== undefined &&
+            validatedData.lineEnd !== undefined;
+
+        const startLine = isCommittableSuggestion
+            ? validatedData.lineStart
+            : lineComment.start_line;
+        const endLine = isCommittableSuggestion
+            ? validatedData.lineEnd
+            : lineComment.line;
+
         const bodyFormatted = this.formatBodyForGitHub(
             lineComment,
             repository,
             translations,
             suggestionCopyPrompt,
+            isCommittableSuggestion,
         );
 
         try {
@@ -2896,8 +2923,8 @@ This is an experimental feature that generates committable changes. Review the d
                 body: bodyFormatted,
                 commit_id: commit?.sha,
                 path: lineComment.path,
-                start_line: this.sanitizeLine(lineComment.start_line),
-                line: this.sanitizeLine(lineComment.line),
+                start_line: this.sanitizeLine(startLine),
+                line: this.sanitizeLine(endLine),
                 side: 'RIGHT',
                 start_side: 'RIGHT',
             });
@@ -3066,13 +3093,13 @@ This is an experimental feature that generates committable changes. Review the d
                         // So we need one of them to actually mark the thread as resolved and the other to match the id we saved in the database.
                         return firstComment
                             ? {
-                                  id: firstComment.id, // Used to actually resolve the thread
-                                  threadId: reviewThread.id,
-                                  isResolved: reviewThread.isResolved,
-                                  isOutdated: reviewThread.isOutdated,
-                                  fullDatabaseId: firstComment.fullDatabaseId, // The REST API id, used to match comments saved in the database.
-                                  body: firstComment.body,
-                              }
+                                id: firstComment.id, // Used to actually resolve the thread
+                                threadId: reviewThread.id,
+                                isResolved: reviewThread.isResolved,
+                                isOutdated: reviewThread.isOutdated,
+                                fullDatabaseId: firstComment.fullDatabaseId, // The REST API id, used to match comments saved in the database.
+                                body: firstComment.body,
+                            }
                             : null;
                     })
                     .filter((comment) => comment !== null);
@@ -3678,12 +3705,12 @@ This is an experimental feature that generates committable changes. Review the d
         organizationAndTeamData: OrganizationAndTeamData;
         commentId: string;
         reason?:
-            | 'ABUSE'
-            | 'OFF_TOPIC'
-            | 'OUTDATED'
-            | 'RESOLVED'
-            | 'DUPLICATE'
-            | 'SPAM';
+        | 'ABUSE'
+        | 'OFF_TOPIC'
+        | 'OUTDATED'
+        | 'RESOLVED'
+        | 'DUPLICATE'
+        | 'SPAM';
     }): Promise<any | null> {
         try {
             const {
@@ -4068,15 +4095,15 @@ This is an experimental feature that generates committable changes. Review the d
                 reactions: {
                     thumbsUp: isOAuth
                         ? Math.max(
-                              0,
-                              comment.reactions[GitHubReaction.THUMBS_UP] - 1,
-                          )
+                            0,
+                            comment.reactions[GitHubReaction.THUMBS_UP] - 1,
+                        )
                         : comment.reactions[GitHubReaction.THUMBS_UP],
                     thumbsDown: isOAuth
                         ? Math.max(
-                              0,
-                              comment.reactions[GitHubReaction.THUMBS_DOWN] - 1,
-                          )
+                            0,
+                            comment.reactions[GitHubReaction.THUMBS_DOWN] - 1,
+                        )
                         : comment.reactions[GitHubReaction.THUMBS_DOWN],
                 },
                 comment: {
@@ -5021,13 +5048,13 @@ This is an experimental feature that generates committable changes. Review the d
                         // So we need one of them to actually mark the thread as resolved and the other to match the id we saved in the database.
                         return firstComment
                             ? {
-                                  id: firstComment.id, // Used to actually resolve the thread
-                                  threadId: reviewThread.id,
-                                  isResolved: reviewThread.isResolved,
-                                  isOutdated: reviewThread.isOutdated,
-                                  fullDatabaseId: firstComment.fullDatabaseId, // The REST API id, used to match comments saved in the database.
-                                  body: firstComment.body,
-                              }
+                                id: firstComment.id, // Used to actually resolve the thread
+                                threadId: reviewThread.id,
+                                isResolved: reviewThread.isResolved,
+                                isOutdated: reviewThread.isOutdated,
+                                fullDatabaseId: firstComment.fullDatabaseId, // The REST API id, used to match comments saved in the database.
+                                body: firstComment.body,
+                            }
                             : null;
                     })
                     .filter((comment) => comment !== null);
@@ -5054,11 +5081,11 @@ This is an experimental feature that generates committable changes. Review the d
                     // So we need one of them to actually mark the thread as resolved and the other to match the id we saved in the database.
                     return firstComment
                         ? {
-                              id: firstComment.id, // Used to actually resolve the thread
-                              reviewId: review.id,
-                              fullDatabaseId: firstComment.fullDatabaseId, // The REST API id, used to match comments saved in the database.
-                              body: firstComment.body,
-                          }
+                            id: firstComment.id, // Used to actually resolve the thread
+                            reviewId: review.id,
+                            fullDatabaseId: firstComment.fullDatabaseId, // The REST API id, used to match comments saved in the database.
+                            body: firstComment.body,
+                        }
                         : null;
                 })
                 .filter((comment) => comment !== null);

@@ -328,7 +328,7 @@ describe('ValidateSuggestionsStage', () => {
                 (s) => s.id === 's1',
             );
             expect(suggestion?.isCommittable).toBe(true);
-            expect(suggestion?.validatedCode).toBeDefined();
+            expect(suggestion?.validatedData).toBeDefined();
         });
     });
 
@@ -423,7 +423,11 @@ describe('ValidateSuggestionsStage', () => {
 
             const result = (stage as any).getFormattedSuggestionFromDiff(diff);
 
-            expect(result).toBe('const x = 1;\nconst y = 2;');
+            expect(result).toEqual({
+                code: 'const x = 1;\nconst y = 2;',
+                startLine: 1,
+                endLine: 1,
+            });
         });
 
         it('should return null for multi-file diffs', () => {
