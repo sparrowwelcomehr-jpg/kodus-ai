@@ -4,9 +4,9 @@ import {
     IASTAnalysisService,
 } from '@libs/code-review/domain/contracts/ASTAnalysisService.contract';
 import {
-    ASTValidateCodeItem,
-    ASTValidateCodeRequest,
     SUPPORTED_LANGUAGES,
+    SyntaxCheckRequest,
+    ValidationCandidate,
 } from '@libs/code-review/domain/types/astValidate.type';
 import posthog, { FEATURE_FLAGS } from '@libs/common/utils/posthog';
 import { PlatformType } from '@libs/core/domain/enums';
@@ -27,7 +27,8 @@ import { CodeReviewPipelineContext } from '../context/code-review-pipeline.conte
 export class ValidateSuggestionsStage extends BasePipelineStage<CodeReviewPipelineContext> {
     readonly stageName: string = 'ValidateSuggestionsStage';
     private readonly logger = createLogger(ValidateSuggestionsStage.name);
-    private readonly concurrencyLimit = 10;
+
+    private readonly CONCURRENCY_LIMIT = 10;
     private readonly MAX_LINES_THRESHOLD = 15;
     private readonly MAX_CHARS_THRESHOLD = 1000;
 
@@ -41,90 +42,69 @@ export class ValidateSuggestionsStage extends BasePipelineStage<CodeReviewPipeli
     protected override async executeStage(
         context: CodeReviewPipelineContext,
     ): Promise<CodeReviewPipelineContext> {
-        const { validSuggestions, changedFiles, organizationAndTeamData } =
-            context;
-
         if (!(await this.shouldRunStage(context))) return context;
 
-        const filteredSuggestions = await this.filterComplexSuggestions(
+        const {
             validSuggestions,
-            context,
-        );
-
-        if (filteredSuggestions.length === 0) {
-            this.logger.log({
-                message: 'All suggestions filtered out as too complex/long',
-                context: ValidateSuggestionsStage.name,
-                metadata: {
-                    organizationAndTeamData,
-                    prNumber: context.pullRequest.number,
-                },
-            });
-
-            return context;
-        }
-
-        const patchedFiles = await this.preparePatchedFiles(
-            filteredSuggestions,
             changedFiles,
-        );
-
-        if (patchedFiles.files.length === 0) {
-            this.logger.log({
-                message: 'No patched files generated for validation',
-                context: ValidateSuggestionsStage.name,
-                metadata: {
-                    validSuggestions: filteredSuggestions,
-                    changedFiles,
-                    organizationAndTeamData,
-                    prNumber: context.pullRequest.number,
-                },
-            });
-
-            return context;
-        }
+            organizationAndTeamData,
+            pullRequest,
+        } = context;
+        const prNumber = pullRequest.number;
 
         try {
-            const validSuggestionIds = await this.validateSuggestions(
-                patchedFiles,
-                context.organizationAndTeamData,
-                context.pullRequest.number,
+            const filtered = await this.filterSuggestions(
+                validSuggestions,
+                context,
             );
 
-            const updatedSuggestions = context.validSuggestions.map(
-                (suggestion) => {
-                    if (!validSuggestionIds.has(suggestion.id!)) {
-                        return suggestion;
-                    }
+            if (filtered.length === 0) {
+                this.logGeneral(
+                    'All suggestions filtered out as too complex/long/incompatible',
+                    {
+                        organizationAndTeamData,
+                        prNumber,
+                    },
+                );
 
-                    const patchedFile = patchedFiles.files.find(
-                        (f) => f.id === suggestion.id,
-                    );
+                return context;
+            }
 
-                    if (!patchedFile || !patchedFile.suggestion) {
-                        return suggestion;
-                    }
+            const candidates = await this.prepareValidationCandidates(
+                validSuggestions,
+                changedFiles,
+            );
 
-                    return {
-                        ...suggestion,
-                        isCommittable: true,
-                        validatedCode: patchedFile.suggestion,
-                    };
-                },
+            if (candidates.length === 0) {
+                this.logGeneral('No patched files generated for validation', {
+                    validSuggestions,
+                    changedFiles,
+                    organizationAndTeamData,
+                    prNumber,
+                });
+
+                return context;
+            }
+
+            const validIds = await this.performFullValidation(
+                candidates,
+                organizationAndTeamData,
+                prNumber,
+            );
+
+            const updatedSuggestions = this.mapValidationResults(
+                validSuggestions,
+                candidates,
+                validIds,
             );
 
             return this.updateContext(context, (draft) => {
                 draft.validSuggestions = updatedSuggestions;
             });
         } catch (error) {
-            this.logger.error({
-                message: 'Error during validation process',
-                context: ValidateSuggestionsStage.name,
-                error,
-                metadata: {
-                    organizationAndTeamData,
-                    prNumber: context.pullRequest.number,
-                },
+            this.logError('Error during validation process', error, {
+                organizationAndTeamData,
+                prNumber,
             });
 
             return context;
@@ -150,57 +130,51 @@ export class ValidateSuggestionsStage extends BasePipelineStage<CodeReviewPipeli
         );
 
         if (!featureFlag) {
-            this.logger.debug({
-                message: 'Committable suggestions feature is disabled',
-                context: ValidateSuggestionsStage.name,
-                metadata: {
-                    organizationAndTeamData,
-                    prNumber,
-                },
+            this.logGeneral('Committable suggestions feature is disabled', {
+                organizationAndTeamData,
+                prNumber,
             });
 
             return false;
         }
 
         if (!codeReviewConfig?.enableCommittableSuggestions) {
-            this.logger.debug({
-                message:
-                    'Committable suggestions feature is disabled in the configuration',
-                context: ValidateSuggestionsStage.name,
-                metadata: {
+            this.logGeneral(
+                'Committable suggestions feature is disabled in the configuration',
+                {
                     organizationAndTeamData,
                     prNumber,
                 },
-            });
+            );
 
             return false;
         }
 
         if (platformType !== PlatformType.GITHUB) {
-            this.logger.debug({
-                message: 'Skipping validation stage for non-GitHub platform',
-                context: ValidateSuggestionsStage.name,
-                metadata: {
+            this.logGeneral(
+                'Skipping validation stage for non-GitHub platform',
+
+                {
                     platformType,
                     prNumber,
                     organizationAndTeamData,
                 },
-            });
+            );
 
             return false;
         }
 
         if (!validSuggestions?.length || !changedFiles?.length) {
-            this.logger.debug({
-                message: 'No valid suggestions or changed files to validate',
-                context: ValidateSuggestionsStage.name,
-                metadata: {
+            this.logGeneral(
+                'No valid suggestions or changed files to validate',
+
+                {
                     organizationAndTeamData,
                     prNumber,
                     validSuggestionsCount: validSuggestions?.length || 0,
                     changedFilesCount: changedFiles?.length || 0,
                 },
-            });
+            );
 
             return false;
         }
@@ -208,356 +182,147 @@ export class ValidateSuggestionsStage extends BasePipelineStage<CodeReviewPipeli
         return true;
     }
 
-    private async filterComplexSuggestions(
-        suggestions: Partial<CodeSuggestion>[],
-        context: CodeReviewPipelineContext,
-    ): Promise<Partial<CodeSuggestion>[]> {
-        const limit = pLimit(this.concurrencyLimit);
+    private async performFullValidation(
+        candidates: ValidationCandidate[],
+        orgData: OrganizationAndTeamData,
+        prNumber: number,
+    ): Promise<Set<string>> {
+        const payload: SyntaxCheckRequest = {
+            files: candidates.map(
+                ({ id, encodedData, language, filePath }) => ({
+                    id,
+                    encodedData,
+                    language,
+                    filePath,
+                }),
+            ),
+        };
 
-        const tasks = suggestions.map((suggestion) =>
+        const { taskId } = await this.astAnalysisService.startValidate(payload);
+
+        const taskRes = await this.astAnalysisService.awaitTask(
+            taskId,
+            orgData,
+        );
+        if (taskRes?.task?.status !== TaskStatus.TASK_STATUS_COMPLETED) {
+            throw new Error(
+                `Validation task ${taskId} incomplete: ${taskRes?.task?.status}`,
+            );
+        }
+
+        const astResults = await this.astAnalysisService.getValidate(
+            taskId,
+            orgData,
+        );
+        if (!astResults) {
+            throw new Error('No results returned from AST validation');
+        }
+
+        const validAstItems = astResults.results.filter(
+            (r) => r.isValid && r.id,
+        );
+        const candidateMap = new Map(candidates.map((c) => [c.id, c]));
+
+        const limit = pLimit(this.CONCURRENCY_LIMIT);
+        const llmValidations = validAstItems.map((item) =>
             limit(async () => {
-                const chars = suggestion.improvedCode?.length || 0;
-                const lines = suggestion.improvedCode?.split('\n').length || 0;
-
-                if (chars >= this.MAX_CHARS_THRESHOLD) {
-                    this.logger.log({
-                        message:
-                            'Discarding complex suggestion due to char count',
-                        context: ValidateSuggestionsStage.name,
-                        metadata: {
-                            organizationAndTeamData:
-                                context.organizationAndTeamData,
-                            prNumber: context.pullRequest.number,
-                            suggestionId: suggestion.id,
-                            lines,
-                            chars,
-                        },
+                const candidate = candidateMap.get(item.id);
+                if (!candidate) {
+                    this.logWarn(`No candidate found for AST valid item`, {
+                        id: item.id,
+                        filePath: item.filePath,
+                        prNumber,
+                        orgData,
                     });
-
                     return null;
                 }
 
-                if (lines >= this.MAX_LINES_THRESHOLD) {
-                    this.logger.log({
-                        message:
-                            'Discarding complex suggestion due to line count',
-                        context: ValidateSuggestionsStage.name,
-                        metadata: {
-                            organizationAndTeamData:
-                                context.organizationAndTeamData,
-                            prNumber: context.pullRequest.number,
-                            suggestionId: suggestion.id,
-                            lines,
-                            chars,
-                        },
-                    });
-
-                    return null;
-                }
-
-                try {
-                    const { isSimple, reason } =
-                        await this.astAnalysisService.checkSuggestionSimplicity(
-                            context.organizationAndTeamData,
-                            context.pullRequest.number,
-                            suggestion,
-                        );
-
-                    if (isSimple) {
-                        return suggestion;
-                    }
-
-                    this.logger.log({
-                        message: 'Discarding complex suggestion',
-                        context: ValidateSuggestionsStage.name,
-                        metadata: {
-                            organizationAndTeamData:
-                                context.organizationAndTeamData,
-                            prNumber: context.pullRequest.number,
-                            suggestionId: suggestion.id,
-                            lines,
-                            reason,
-                        },
-                    });
-
-                    return null;
-                } catch (error) {
-                    this.logger.error({
-                        message: 'Error checking suggestion simplicity',
-                        context: ValidateSuggestionsStage.name,
-                        metadata: {
-                            suggestionId: suggestion.id,
-                            organizationAndTeamData:
-                                context.organizationAndTeamData,
-                            prNumber: context.pullRequest.number,
-                        },
-                        error,
-                    });
-                    // Fail safe: discard if check fails
-                    return null;
-                }
+                const isValid = await this.validateWithLLM(
+                    taskId,
+                    candidate,
+                    orgData,
+                    prNumber,
+                );
+                return isValid ? item.id : null;
             }),
         );
 
-        const results = await Promise.allSettled(tasks);
-        return results
-            .filter(
-                (
-                    result,
-                ): result is PromiseFulfilledResult<Partial<CodeSuggestion> | null> =>
-                    result.status === 'fulfilled',
-            )
-            .map((result) => result.value)
-            .filter((s): s is Partial<CodeSuggestion> => s !== null);
+        const llmResults = await Promise.allSettled(llmValidations);
+        const validIds = llmResults
+            .map((res) => (res.status === 'fulfilled' ? res.value : null))
+            .filter((id): id is string => id !== null);
+
+        return new Set(validIds);
     }
 
-    private async preparePatchedFiles(
-        suggestions: Partial<CodeSuggestion>[],
-        files: FileChange[],
-    ): Promise<ASTValidateCodeRequest> {
-        const suggestionsByFilePath = this.groupSuggestionsByFile(
-            suggestions,
-            files,
-        );
-
-        return this.generatePatchedFiles(suggestionsByFilePath);
-    }
-
-    private async validateSuggestions(
-        patchedFiles: ASTValidateCodeRequest,
-        organizationAndTeamData: OrganizationAndTeamData,
+    private async validateWithLLM(
+        taskId: string,
+        candidate: ValidationCandidate,
+        orgData: OrganizationAndTeamData,
         prNumber: number,
-    ): Promise<Set<string>> {
-        const { taskId } = await this.startValidationTask(patchedFiles);
-
-        await this.awaitValidationTask(taskId, organizationAndTeamData);
-
-        const validationResults = await this.getValidationResults(
-            taskId,
-            patchedFiles,
-            organizationAndTeamData,
-            prNumber,
-        );
-
-        if (!validationResults?.length) {
-            this.logger.warn({
-                message: 'No validation results returned',
-                context: ValidateSuggestionsStage.name,
-                metadata: { organizationAndTeamData, prNumber, taskId },
-            });
-
-            return new Set();
-        }
-
-        this.logger.log({
-            message: 'Validation results retrieved',
-            context: ValidateSuggestionsStage.name,
-            metadata: {
-                resultsCount: validationResults?.length,
-                organizationAndTeamData,
-                prNumber,
+    ): Promise<boolean> {
+        try {
+            const code = Buffer.from(candidate.encodedData, 'base64').toString(
+                'utf-8',
+            );
+            const res = await this.astAnalysisService.validateWithLLM(
                 taskId,
-            },
-        });
-
-        const passedValidationIds = validationResults
-            ?.filter((r) => r.isValid)
-            .map((r) => r.id)
-            .filter((id): id is string => !!id);
-
-        return new Set(passedValidationIds);
-    }
-
-    private groupSuggestionsByFile(
-        suggestions: Partial<CodeSuggestion>[],
-        files: FileChange[],
-    ) {
-        return suggestions.reduce<{
-            [filePath: string]: {
-                fileData: FileChange;
-                suggestions: Partial<CodeSuggestion>[];
-            };
-        }>((acc, suggestion) => {
-            const file = suggestion.relevantFile;
-            if (!acc[file]) {
-                const fileData = files.find((f) => f.filename === file);
-                if (fileData) {
-                    acc[file] = {
-                        fileData,
-                        suggestions: [],
-                    };
-                }
-            }
-            if (acc[file]) {
-                acc[file].suggestions.push(suggestion);
-            }
-            return acc;
-        }, {});
-    }
-
-    private isLanguageSupported(filename: string): boolean {
-        const extension = filename.slice(filename.lastIndexOf('.'));
-        if (!extension || extension === filename) return false;
-
-        return Object.values(SUPPORTED_LANGUAGES).some((lang) =>
-            lang.extensions.includes(extension),
-        );
-    }
-
-    private async generatePatchedFiles(suggestionsByFilePath: {
-        [filePath: string]: {
-            fileData: FileChange;
-            suggestions: Partial<CodeSuggestion>[];
-        };
-    }): Promise<ASTValidateCodeRequest> {
-        const limit = pLimit(this.concurrencyLimit);
-        const tasks: Promise<ASTValidateCodeItem | null>[] = [];
-
-        for (const [filePath, { fileData, suggestions }] of Object.entries(
-            suggestionsByFilePath,
-        )) {
-            if (!this.isLanguageSupported(filePath)) {
-                this.logger.log({
-                    message: `Skipping validation for unsupported file type`,
-                    context: ValidateSuggestionsStage.name,
-                    metadata: { filePath },
-                });
-
-                continue;
-            }
-
-            const originalCode = fileData?.fileContent;
-
-            if (!originalCode) {
-                this.logger.warn({
-                    message: `Original code is empty for file`,
-                    context: ValidateSuggestionsStage.name,
-                    metadata: { filePath },
-                });
-
-                continue;
-            }
-
-            for (const suggestion of suggestions) {
-                tasks.push(
-                    limit(async () => {
-                        try {
-                            if (
-                                !suggestion.id ||
-                                !suggestion.improvedCode ||
-                                !suggestion.llmPrompt
-                            ) {
-                                this.logger.warn({
-                                    message: `Missing data in suggestion`,
-                                    context: ValidateSuggestionsStage.name,
-                                    metadata: {
-                                        suggestionId: suggestion.id,
-                                        filePath,
-                                        improvedCodePresent:
-                                            !!suggestion.improvedCode,
-                                        llmPromptPresent:
-                                            !!suggestion.llmPrompt,
-                                    },
-                                });
-
-                                return null;
-                            }
-
-                            const result = await applyEdit(
-                                {
-                                    originalCode,
-                                    codeEdit: suggestion.improvedCode,
-                                    instructions: suggestion.llmPrompt,
-                                    filepath: filePath,
-                                },
-                                {
-                                    morphApiKey:
-                                        process.env.API_MORPHLLM_API_KEY,
-                                },
-                            );
-
-                            if (!result || !result.mergedCode) {
-                                this.logger.warn({
-                                    message: `MorphLLM failed to apply edit for suggestion`,
-                                    context: ValidateSuggestionsStage.name,
-                                    metadata: {
-                                        suggestionId: suggestion.id,
-                                        filePath,
-                                        result,
-                                    },
-                                });
-
-                                return null;
-                            }
-
-                            const encodedData = Buffer.from(
-                                result.mergedCode,
-                            ).toString('base64');
-
-                            const formattedSuggestion =
-                                this.getFormattedSuggestionFromDiff(
-                                    result.udiff,
-                                );
-
-                            if (!formattedSuggestion) {
-                                this.logger.warn({
-                                    message: `Formatted suggestion is empty after diff processing`,
-                                    context: ValidateSuggestionsStage.name,
-                                    metadata: {
-                                        suggestionId: suggestion.id,
-                                        filePath,
-                                    },
-                                });
-
-                                return null;
-                            }
-
-                            return {
-                                id: suggestion.id,
-                                filePath,
-                                encodedData,
-                                diff: result.udiff,
-                                suggestion: formattedSuggestion,
-                            };
-                        } catch (error) {
-                            this.logger.error({
-                                message: `Error applying edit for suggestion ${suggestion.id}`,
-                                context: ValidateSuggestionsStage.name,
-                                error,
-                                metadata: { filePath },
-                            });
-
-                            return null;
-                        }
-                    }),
-                );
-            }
+                {
+                    code,
+                    filePath: candidate.filePath,
+                    diff: candidate.diff,
+                    language: candidate.language,
+                },
+                orgData,
+                prNumber,
+            );
+            return !!res?.isValid;
+        } catch (error) {
+            this.logError('LLM validation error', error, { id: candidate.id });
+            return false;
         }
-
-        const results = await Promise.allSettled(tasks);
-
-        const files = results
-            .filter(
-                (
-                    result,
-                ): result is PromiseFulfilledResult<ASTValidateCodeItem> =>
-                    result.status === 'fulfilled' && result.value !== null,
-            )
-            .map((result) => result.value);
-
-        return { files };
     }
 
-    private getFormattedSuggestionFromDiff(diff: string): string | null {
+    private mapValidationResults(
+        originalSuggestions: Partial<CodeSuggestion>[],
+        candidates: ValidationCandidate[],
+        validIds: Set<string>,
+    ): Partial<CodeSuggestion>[] {
+        const candidateMap = new Map(candidates.map((c) => [c.id, c]));
+
+        return originalSuggestions.map((suggestion) => {
+            if (!suggestion.id || !validIds.has(suggestion.id))
+                return suggestion;
+
+            const candidate = candidateMap.get(suggestion.id);
+            if (!candidate) return suggestion;
+
+            return {
+                ...suggestion,
+                isCommittable: true,
+                validatedData: {
+                    code: candidate.suggestion,
+                    diff: candidate.diff,
+                    lineStart: candidate.newLineStart,
+                    lineEnd: candidate.newLineEnd,
+                },
+            };
+        });
+    }
+
+    private getFormattedSuggestionFromDiff(diff: string): {
+        code: string;
+        startLine: number;
+        endLine: number;
+    } | null {
         const parsedDiff = parsePatch(diff);
 
         if (parsedDiff.length !== 1) {
-            this.logger.warn({
-                message:
-                    'Suggestion diff affects multiple files, marking as complex.',
-                context: ValidateSuggestionsStage.name,
-                metadata: { diff },
-            });
+            this.logWarn(
+                'Suggestion diff affects multiple files, marking as complex.',
+
+                { diff },
+            );
 
             return null;
         }
@@ -565,12 +330,10 @@ export class ValidateSuggestionsStage extends BasePipelineStage<CodeReviewPipeli
         const fileDiff = parsedDiff[0];
 
         if (fileDiff.hunks.length !== 1) {
-            this.logger.warn({
-                message:
-                    'Suggestion contains multiple hunks, marking as complex.',
-                context: ValidateSuggestionsStage.name,
-                metadata: { diff },
-            });
+            this.logWarn(
+                'Suggestion contains multiple hunks, marking as complex.',
+                { diff },
+            );
 
             return null;
         }
@@ -578,15 +341,13 @@ export class ValidateSuggestionsStage extends BasePipelineStage<CodeReviewPipeli
         const hunk = fileDiff.hunks[0];
 
         if (hunk.lines.length > this.MAX_LINES_THRESHOLD) {
-            this.logger.warn({
-                message:
-                    'Suggestion hunk exceeds maximum line threshold, marking as complex.',
-                context: ValidateSuggestionsStage.name,
-                metadata: {
+            this.logWarn(
+                'Suggestion hunk exceeds maximum line threshold, marking as complex.',
+                {
                     linesCount: hunk.lines.length,
                     diff,
                 },
-            });
+            );
 
             return null;
         }
@@ -597,198 +358,283 @@ export class ValidateSuggestionsStage extends BasePipelineStage<CodeReviewPipeli
         );
 
         if (charCount > this.MAX_CHARS_THRESHOLD) {
-            this.logger.warn({
-                message:
-                    'Suggestion hunk exceeds maximum character threshold, marking as complex.',
-                context: ValidateSuggestionsStage.name,
-                metadata: {
+            this.logWarn(
+                'Suggestion hunk exceeds maximum character threshold, marking as complex.',
+                {
                     charCount: hunk.lines.reduce(
                         (acc, line) => acc + line.length,
                         0,
                     ),
                     diff,
                 },
-            });
+            );
 
             return null;
         }
 
         const suggestionLines: string[] = [];
 
+        let currentLineNum = hunk.newStart;
+        let firstAddedLineNum: number | null = null;
+        let lastAddedLineNum: number | null = null;
+
         for (const line of hunk.lines) {
-            if (line.startsWith('+') && !line.startsWith('+++')) {
-                suggestionLines.push(line.slice(1));
-            }
-        }
+            const indicator = line[0];
 
-        return suggestionLines.join('\n');
-    }
-
-    private async startValidationTask(
-        patchedFiles: ASTValidateCodeRequest,
-    ): Promise<{ taskId: string }> {
-        return await this.astAnalysisService.startValidate({
-            files: patchedFiles,
-        });
-    }
-
-    private async awaitValidationTask(
-        taskId: string,
-        organizationAndTeamData: any,
-    ): Promise<void> {
-        const taskRes = await this.astAnalysisService.awaitTask(
-            taskId,
-            organizationAndTeamData,
-        );
-
-        if (
-            !taskRes ||
-            taskRes.task.status !== TaskStatus.TASK_STATUS_COMPLETED
-        ) {
-            throw new Error('Task failed or timed out');
-        }
-    }
-
-    private async getValidationResults(
-        taskId: string,
-        patchedFiles: ASTValidateCodeRequest,
-        organizationAndTeamData: OrganizationAndTeamData,
-        prNumber: number,
-    ): Promise<{ id: string; isValid: boolean }[]> {
-        const result = await this.astAnalysisService.getValidate(
-            taskId,
-            organizationAndTeamData,
-        );
-
-        if (!result) {
-            this.logger.warn({
-                message: 'No results returned from validation task',
-                context: ValidateSuggestionsStage.name,
-                metadata: { taskId, organizationAndTeamData, prNumber },
-            });
-
-            throw new Error('No results returned from validation task');
-        }
-
-        const validAstSuggestions = result.results.filter((r) => r.isValid);
-
-        const validationPromises = validAstSuggestions.map(async (r) => {
-            if (!r.id) {
-                this.logger.warn({
-                    message: `Missing ID in validation result for file`,
-                    context: ValidateSuggestionsStage.name,
-                    metadata: {
-                        taskId,
-                        filePath: r.filePath,
-                        organizationAndTeamData,
-                        prNumber,
-                    },
-                });
-
-                return null;
-            }
-
-            const originalFile = patchedFiles.files.find((f) => f.id === r.id);
-
-            if (!originalFile) {
-                this.logger.warn({
-                    message: `Could not find original request for file`,
-                    context: ValidateSuggestionsStage.name,
-                    metadata: {
-                        id: r.id,
-                        filePath: r.filePath,
-                        taskId,
-                        organizationAndTeamData,
-                        prNumber,
-                    },
-                });
-
-                return null;
-            }
-
-            const originalCode = Buffer.from(
-                originalFile.encodedData,
-                'base64',
-            ).toString('utf-8');
-
-            if (!originalCode) {
-                this.logger.warn({
-                    message: `Original code is empty for file`,
-                    context: ValidateSuggestionsStage.name,
-                    metadata: {
-                        id: r.id,
-                        filePath: r.filePath,
-                        taskId,
-                        organizationAndTeamData,
-                        prNumber,
-                    },
-                });
-
-                return null;
-            }
-
-            const llmResult = await this.astAnalysisService.validateWithLLM(
-                taskId,
-                {
-                    code: originalCode,
-                    filePath: originalFile.filePath,
-                    diff: originalFile.diff,
-                    language: originalFile.language,
-                },
-                organizationAndTeamData,
-                prNumber,
-            );
-
-            if (!llmResult) {
-                this.logger.warn({
-                    message: `LLM validation returned no result for file`,
-                    context: ValidateSuggestionsStage.name,
-                    metadata: {
-                        id: r.id,
-                        filePath: r.filePath,
-                        taskId,
-                        organizationAndTeamData,
-                        prNumber,
-                    },
-                });
-
-                return null;
-            }
-
-            return {
-                id: r.id,
-                isValid: llmResult.isValid,
-            };
-        });
-
-        const resultsSettled = await Promise.allSettled(validationPromises);
-
-        const resultsWithLLM = resultsSettled
-            .map((outcome, index) => {
-                if (outcome.status === 'fulfilled') {
-                    return outcome.value;
+            if (indicator === '+') {
+                if (!line.startsWith('+++')) {
+                    suggestionLines.push(line.slice(1));
+                }
+            } else if (indicator === '-') {
+                if (firstAddedLineNum === null) {
+                    firstAddedLineNum = currentLineNum;
                 }
 
-                const originalResult =
-                    validAstSuggestions[index] || result.results[index];
+                lastAddedLineNum = currentLineNum;
 
-                this.logger.error({
-                    message: `Error during LLM validation for file`,
-                    context: ValidateSuggestionsStage.name,
-                    error: outcome.reason,
-                    metadata: {
-                        id: originalResult?.id,
-                        filePath: originalResult?.filePath,
-                        taskId,
-                        organizationAndTeamData,
-                        prNumber,
-                    },
-                });
+                currentLineNum++;
+            } else if (indicator !== '\\') {
+                currentLineNum++;
+            }
+        }
 
-                return null;
-            })
-            .filter((item): item is { id: string; isValid: boolean } => !!item);
+        if (firstAddedLineNum === null || lastAddedLineNum === null) {
+            this.logWarn(
+                'No added lines found in suggestion hunk, marking as complex.',
+                { diff },
+            );
 
-        return resultsWithLLM;
+            return null;
+        }
+
+        return {
+            code: suggestionLines.join('\n'),
+            startLine: firstAddedLineNum,
+            endLine: lastAddedLineNum,
+        };
+    }
+
+    private async filterSuggestions(
+        suggestions: Partial<CodeSuggestion>[],
+        context: CodeReviewPipelineContext,
+    ): Promise<Partial<CodeSuggestion>[]> {
+        const limit = pLimit(this.CONCURRENCY_LIMIT);
+
+        const tasks = suggestions.map((suggestion) =>
+            limit(async () => {
+                const filePath = suggestion.relevantFile;
+                const code = suggestion.improvedCode || '';
+                const lines = code.split('\n').length;
+                const chars = code.length;
+
+                // Language Support Check
+                if (!filePath || !this.isLanguageSupported(filePath)) {
+                    this.logDiscard(
+                        suggestion.id,
+                        'Unsupported language',
+                        { filePath },
+                        context,
+                    );
+                    return null;
+                }
+
+                // Threshold Check
+                if (
+                    chars >= this.MAX_CHARS_THRESHOLD ||
+                    lines >= this.MAX_LINES_THRESHOLD
+                ) {
+                    this.logDiscard(
+                        suggestion.id,
+                        'Threshold exceeded',
+                        { lines, chars },
+                        context,
+                    );
+                    return null;
+                }
+
+                // AST Simplicity Check
+                try {
+                    const { isSimple, reason } =
+                        await this.astAnalysisService.checkSuggestionSimplicity(
+                            context.organizationAndTeamData,
+                            context.pullRequest.number,
+                            suggestion,
+                        );
+
+                    if (isSimple) return suggestion;
+
+                    this.logDiscard(
+                        suggestion.id,
+                        'Complex suggestion',
+                        { reason },
+                        context,
+                    );
+                    return null;
+                } catch (error) {
+                    this.logDiscard(
+                        suggestion.id,
+                        'Error during simplicity check',
+                        {
+                            error,
+                        },
+                        context,
+                    );
+
+                    return null;
+                }
+            }),
+        );
+
+        const results = await Promise.allSettled(tasks);
+        return results
+            .filter(
+                (
+                    r,
+                ): r is PromiseFulfilledResult<Partial<CodeSuggestion> | null> =>
+                    r.status === 'fulfilled',
+            )
+            .map((r) => r.value)
+            .filter((s): s is Partial<CodeSuggestion> => !!s);
+    }
+
+    private async prepareValidationCandidates(
+        suggestions: Partial<CodeSuggestion>[],
+        files: FileChange[],
+    ): Promise<ValidationCandidate[]> {
+        const limit = pLimit(this.CONCURRENCY_LIMIT);
+        const grouped = this.groupSuggestionsByFile(suggestions, files);
+        const tasks: Promise<ValidationCandidate | null>[] = [];
+
+        for (const [filePath, { fileData, suggestions }] of Object.entries(
+            grouped,
+        )) {
+            if (!this.isLanguageSupported(filePath) || !fileData?.fileContent)
+                continue;
+
+            for (const suggestion of suggestions) {
+                tasks.push(
+                    limit(async () =>
+                        this.applySingleEdit(
+                            suggestion,
+                            filePath,
+                            fileData.fileContent,
+                        ),
+                    ),
+                );
+            }
+        }
+
+        const results = await Promise.allSettled(tasks);
+        return results
+            .filter(
+                (r): r is PromiseFulfilledResult<ValidationCandidate | null> =>
+                    r.status === 'fulfilled',
+            )
+            .map((r) => r.value)
+            .filter((v): v is ValidationCandidate => !!v);
+    }
+
+    private async applySingleEdit(
+        suggestion: Partial<CodeSuggestion>,
+        filePath: string,
+        originalCode: string,
+    ): Promise<ValidationCandidate | null> {
+        if (!suggestion.id || !suggestion.improvedCode || !suggestion.llmPrompt)
+            return null;
+
+        try {
+            const result = await applyEdit(
+                {
+                    originalCode,
+                    codeEdit: suggestion.improvedCode,
+                    instructions: suggestion.llmPrompt,
+                    filepath: filePath,
+                },
+                { morphApiKey: process.env.API_MORPHLLM_API_KEY },
+            );
+
+            if (!result?.mergedCode) return null;
+
+            const formatted = this.getFormattedSuggestionFromDiff(result.udiff);
+            if (!formatted) return null;
+
+            return {
+                id: suggestion.id,
+                filePath,
+                encodedData: Buffer.from(result.mergedCode).toString('base64'),
+                diff: result.udiff,
+                suggestion: formatted.code,
+                newLineStart: formatted.startLine,
+                newLineEnd: formatted.endLine,
+            };
+        } catch (error) {
+            this.logError('Failed to apply single edit', error, {
+                suggestionId: suggestion.id,
+                filePath,
+            });
+
+            return null;
+        }
+    }
+
+    private isLanguageSupported(filename: string): boolean {
+        const extension = filename.slice(filename.lastIndexOf('.'));
+        return Object.values(SUPPORTED_LANGUAGES).some((lang) =>
+            lang.extensions.includes(extension),
+        );
+    }
+
+    private groupSuggestionsByFile(
+        suggestions: Partial<CodeSuggestion>[],
+        files: FileChange[],
+    ) {
+        return suggestions.reduce<{
+            [path: string]: {
+                fileData: FileChange;
+                suggestions: Partial<CodeSuggestion>[];
+            };
+        }>((acc, suggestion) => {
+            const path = suggestion.relevantFile!;
+            if (!acc[path]) {
+                const fileData = files.find((f) => f.filename === path);
+                if (fileData) acc[path] = { fileData, suggestions: [] };
+            }
+            if (acc[path]) acc[path].suggestions.push(suggestion);
+            return acc;
+        }, {});
+    }
+
+    private logDiscard(
+        id: string | undefined,
+        reason: string,
+        meta: object,
+        context: CodeReviewPipelineContext,
+    ) {
+        this.logger.log({
+            message: `Discarding suggestion: ${reason}`,
+            context: this.stageName,
+            metadata: {
+                suggestionId: id,
+                pr: context.pullRequest.number,
+                ...meta,
+            },
+        });
+    }
+
+    private logGeneral(message: string, metadata: object) {
+        this.logger.log({ message, context: this.stageName, metadata });
+    }
+
+    private logWarn(message: string, metadata: object) {
+        this.logger.warn({ message, context: this.stageName, metadata });
+    }
+
+    private logError(message: string, error: any, metadata: object) {
+        this.logger.error({
+            message,
+            context: this.stageName,
+            error,
+            metadata,
+        });
     }
 }
