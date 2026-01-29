@@ -191,8 +191,14 @@ export type CodeSuggestion = {
     createdAt?: string;
     updatedAt?: string;
     action?: string;
+
     isCommittable?: boolean;
-    validatedCode?: string;
+    validatedData?: {
+        code: string;
+        diff: string;
+        lineStart: number;
+        lineEnd: number;
+    };
 };
 
 export type FileChange = {
