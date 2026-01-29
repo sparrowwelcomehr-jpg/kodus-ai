@@ -2606,47 +2606,47 @@ export class GithubService
 
         const octokit = await this.instanceOctokit(organizationAndTeamData);
 
-        // 1. Retrieve all commits in the Pull Request
+        // 1. Get the SHA of the last analyzed commit
+        const baseSha = lastCommit?.sha;
+
+        // 2. Get all commits in the PR and find the most recent one (head)
         const commits = await octokit.paginate(octokit.pulls.listCommits, {
             owner: githubAuthDetail?.org,
             repo: repository?.name,
-            sort: 'created',
-            direction: 'asc',
             pull_number: prNumber,
         });
 
-        const changedFiles = [];
-
-        // 2. Filter commits that occurred after the date of the last saved commit
-        const newCommits = commits.filter(
-            (commit) =>
-                new Date(commit.commit.author.date) >
-                new Date(lastCommit.created_at),
+        const sortedCommits = [...commits].sort(
+            (a, b) =>
+                new Date(a?.commit?.author?.date).getTime() -
+                new Date(b?.commit?.author?.date).getTime(),
         );
 
-        // 3. Iterate over the filtered commits and retrieve the differences
-        for (const commit of newCommits) {
-            const { data: commitData } = await octokit.repos.getCommit({
-                owner: githubAuthDetail?.org,
-                repo: repository.name,
-                ref: commit.sha,
-            });
+        const headSha = sortedCommits[sortedCommits?.length - 1]?.sha;
 
-            const commitFiles = commitData.files || [];
-            changedFiles.push(...commitFiles);
+        if (!headSha || !baseSha || baseSha === headSha) {
+            return [];
         }
 
-        // 4. Map the changes to the desired format
-        return changedFiles.map((file) => {
-            return {
-                filename: file.filename,
-                status: file.status,
-                additions: file.additions,
-                deletions: file.deletions,
-                changes: file.changes,
-                patch: file.patch,
-            };
-        });
+        // 3. Compare the two commits to get only the new changes
+        // This returns the diff between the last reviewed commit and the latest commit
+        const { data: comparison } =
+            await octokit.repos.compareCommitsWithBasehead({
+                owner: githubAuthDetail?.org,
+                repo: repository.name,
+                basehead: `${baseSha}...${headSha}`,
+            });
+
+        const files = comparison.files || [];
+
+        return files.map((file) => ({
+            filename: file.filename,
+            status: file.status,
+            additions: file.additions,
+            deletions: file.deletions,
+            changes: file.changes,
+            patch: file.patch,
+        }));
     }
 
     async getPullRequestsForRTTM(
