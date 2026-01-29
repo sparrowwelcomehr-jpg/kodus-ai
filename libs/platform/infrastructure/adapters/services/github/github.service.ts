@@ -2808,12 +2808,10 @@ ${copyPrompt}
         repository: any,
         translations: any,
         suggestionCopyPrompt: boolean,
+        isCommittableSuggestion?: boolean,
     ) {
-        const isCommittableSuggestion =
-            lineComment?.suggestion?.isCommittable &&
-            lineComment?.suggestion?.validatedCode;
         const improvedCode = isCommittableSuggestion
-            ? lineComment?.suggestion?.validatedCode
+            ? lineComment?.suggestion?.validatedData?.code
             : lineComment?.body?.improvedCode;
 
         const language = isCommittableSuggestion
@@ -2893,11 +2891,28 @@ This is an experimental feature that generates committable changes. Review the d
             TranslationsCategory.ReviewComment,
         );
 
+        const { isCommittable, validatedData } = lineComment?.suggestion || {};
+
+        const isCommittableSuggestion =
+            isCommittable &&
+            validatedData &&
+            validatedData.code &&
+            validatedData.lineStart !== undefined &&
+            validatedData.lineEnd !== undefined;
+
+        const startLine = isCommittableSuggestion
+            ? validatedData.lineStart
+            : lineComment.start_line;
+        const endLine = isCommittableSuggestion
+            ? validatedData.lineEnd
+            : lineComment.line;
+
         const bodyFormatted = this.formatBodyForGitHub(
             lineComment,
             repository,
             translations,
             suggestionCopyPrompt,
+            isCommittableSuggestion,
         );
 
         try {
@@ -2908,8 +2923,8 @@ This is an experimental feature that generates committable changes. Review the d
                 body: bodyFormatted,
                 commit_id: commit?.sha,
                 path: lineComment.path,
-                start_line: this.sanitizeLine(lineComment.start_line),
-                line: this.sanitizeLine(lineComment.line),
+                start_line: this.sanitizeLine(startLine),
+                line: this.sanitizeLine(endLine),
                 side: 'RIGHT',
                 start_side: 'RIGHT',
             });
