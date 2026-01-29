@@ -1464,27 +1464,38 @@ export class GitlabService implements Omit<
 
         const gitlabAPI = this.instanceGitlabApi(gitlabAuthDetail);
 
+        // 1. Get the SHA of the last analyzed commit
+        const baseSha = lastCommit?.sha;
+
+        // 2. Get all commits in the MR and find the most recent one (head)
         const commits = await gitlabAPI.MergeRequests.allCommits(
             repository.id,
             prNumber,
         );
 
-        const changedFiles = [];
-
-        const newCommits = commits.filter(
-            (commit) =>
-                new Date(commit.created_at) > new Date(lastCommit.created_at),
+        const sortedCommits = [...commits].sort(
+            (a, b) =>
+                new Date(a.created_at).getTime() -
+                new Date(b.created_at).getTime(),
         );
 
-        for (const commit of newCommits) {
-            const commitDiff = await gitlabAPI.Commits.showDiff(
-                repository.id,
-                commit.id,
-            );
-            changedFiles.push(...commitDiff);
+        const headSha = sortedCommits[sortedCommits?.length - 1]?.id;
+
+        if (!headSha || !baseSha || baseSha === headSha) {
+            return [];
         }
 
-        return changedFiles.map((file) => {
+        // 3. Compare the two commits to get only the new changes
+        // This returns the diff between the last reviewed commit and the latest commit
+        const comparison = await gitlabAPI.Repositories.compare(
+            repository.id,
+            baseSha,
+            headSha,
+        );
+
+        const diffs = comparison.diffs || [];
+
+        return diffs.map((file) => {
             const changeCount = this.countChanges(file.diff);
 
             return {
