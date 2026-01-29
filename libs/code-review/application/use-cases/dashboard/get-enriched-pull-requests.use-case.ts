@@ -37,6 +37,7 @@ import {
 import { EnrichedPullRequestsQueryDto } from '@libs/code-review/dtos/dashboard/enriched-pull-requests-query.dto';
 import { EnrichedPullRequestResponse } from '@libs/code-review/dtos/dashboard/enriched-pull-request-response.dto';
 import { Repositories } from '@libs/platform/domain/platformIntegrations/types/codeManagement/repositories.type';
+import { StageVisibility } from '@libs/core/infrastructure/pipeline/enums/stage-visibility.enum';
 
 @Injectable()
 export class GetEnrichedPullRequestsUseCase implements IUseCase {
@@ -257,7 +258,9 @@ export class GetEnrichedPullRequestsUseCase implements IUseCase {
                             return new Map<string, { sent: number; filtered: number }>();
                         }),
                     this.codeReviewExecutionService
-                        .findManyByAutomationExecutionIds(executionUuids)
+                        .findManyByAutomationExecutionIds(executionUuids, {
+                            visibility: StageVisibility.PRIMARY,
+                        })
                         .catch((error) => {
                             this.logger.error({
                                 message: 'Error bulk fetching code reviews',
@@ -322,6 +325,9 @@ export class GetEnrichedPullRequestsUseCase implements IUseCase {
                                 updatedAt: cre.updatedAt,
                                 status: cre.status,
                                 stageName: cre.stageName,
+                                stageLabel:
+                                    (cre as any)?.metadata?.label ||
+                                    cre.stageName,
                                 message: cre.message,
                                 metadata: cre.metadata,
                                 finishedAt: cre.finishedAt,

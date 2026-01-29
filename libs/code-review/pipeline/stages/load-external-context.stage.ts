@@ -23,7 +23,8 @@ export class LoadExternalContextStage
     implements ILoadExternalContextStage
 {
     readonly stageName = 'LoadExternalContextStage';
-    readonly visibility = StageVisibility.SECONDARY;
+    readonly label = 'Loading Context';
+    readonly visibility = StageVisibility.PRIMARY;
 
     private readonly logger = createLogger(LoadExternalContextStage.name);
 

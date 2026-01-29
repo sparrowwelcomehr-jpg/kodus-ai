@@ -284,8 +284,18 @@ export class AutomationCodeReviewService implements Omit<
                         repositoryId: repository?.id,
                     },
                     message,
-                    'PipelineInitialization',
+                    'Kody Review Started',
                 );
+
+            if (result?.stageLog) {
+                await this.automationExecutionService.updateStageLog(
+                    result.stageLog.uuid,
+                    {
+                        status: AutomationStatus.SUCCESS,
+                    },
+                );
+            }
+
             return result?.execution;
         } catch (error) {
             // Check for unique constraint violation (PostgreSQL error code 23505)
@@ -379,7 +389,7 @@ export class AutomationCodeReviewService implements Omit<
             finalStatus,
             finalMessage,
             newData,
-            'PipelineCompletion',
+            'Kody Review Finished',
         );
 
         this.logger.log({

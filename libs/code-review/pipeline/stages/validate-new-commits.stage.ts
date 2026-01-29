@@ -1,5 +1,6 @@
 import { BasePipelineStage } from '@libs/core/infrastructure/pipeline/abstracts/base-stage.abstract';
 import { Inject, Injectable } from '@nestjs/common';
+import { StageVisibility } from '@libs/core/infrastructure/pipeline/enums/stage-visibility.enum';
 import {
     AUTOMATION_EXECUTION_SERVICE_TOKEN,
     IAutomationExecutionService,
@@ -22,6 +23,8 @@ import { StageMessageHelper } from '@libs/core/infrastructure/pipeline/utils/sta
 @Injectable()
 export class ValidateNewCommitsStage extends BasePipelineStage<CodeReviewPipelineContext> {
     readonly stageName = 'ValidateNewCommitsStage';
+    readonly label = 'Checking New Commits';
+    readonly visibility = StageVisibility.PRIMARY;
 
     private readonly logger = createLogger(ValidateNewCommitsStage.name);
 

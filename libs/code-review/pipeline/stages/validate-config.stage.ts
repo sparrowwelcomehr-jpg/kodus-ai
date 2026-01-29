@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { BasePipelineStage } from '@libs/core/infrastructure/pipeline/abstracts/base-stage.abstract';
+import { StageVisibility } from '@libs/core/infrastructure/pipeline/enums/stage-visibility.enum';
 import { IStageValidationResult } from '@libs/core/infrastructure/pipeline/interfaces/stage-result.interface';
 import {
     AUTOMATION_EXECUTION_SERVICE_TOKEN,
@@ -39,6 +40,8 @@ import {
 @Injectable()
 export class ValidateConfigStage extends BasePipelineStage<CodeReviewPipelineContext> {
     stageName = 'ValidateConfigStage';
+    readonly label = 'Validating Configuration';
+    readonly visibility = StageVisibility.PRIMARY;
 
     private readonly logger = createLogger(ValidateConfigStage.name);
 

@@ -2,6 +2,7 @@ import { CodeReviewPipelineObserver } from './code-review-pipeline.observer';
 import { IAutomationExecutionService } from '@libs/automation/domain/automationExecution/contracts/automation-execution.service';
 import { AutomationStatus } from '@libs/automation/domain/automation/enum/automation-status';
 import { CodeReviewPipelineContext } from '@libs/code-review/pipeline/context/code-review-pipeline.context';
+import { StageVisibility } from '@libs/core/infrastructure/pipeline/enums/stage-visibility.enum';
 
 describe('CodeReviewPipelineObserver', () => {
     let observer: CodeReviewPipelineObserver;
@@ -292,6 +293,112 @@ describe('CodeReviewPipelineObserver', () => {
             'Starting stage TestStage',
             'TestStage',
             undefined,
+        );
+    });
+
+    it('should log stage as PARTIAL_ERROR if context has errors for the stage', async () => {
+        // Setup context with errors
+        context.errors = [
+            {
+                stage: 'TestStage',
+                error: new Error('Partial error'),
+            } as any,
+        ];
+
+        // Start stage to populate map
+        await observer.onStageStart(
+            'TestStage',
+            context as CodeReviewPipelineContext,
+        );
+
+        // Finish stage
+        await observer.onStageFinish(
+            'TestStage',
+            context as CodeReviewPipelineContext,
+        );
+
+        expect(mockService.updateStageLog).toHaveBeenCalledWith(
+            'stage-log-uuid',
+            expect.objectContaining({
+                status: AutomationStatus.PARTIAL_ERROR,
+                message: 'Completed stage TestStage',
+                finishedAt: expect.any(Date),
+                metadata: expect.objectContaining({
+                    partialErrors: expect.arrayContaining([
+                        expect.objectContaining({
+                            message: 'Partial error',
+                        }),
+                    ]),
+                }),
+            }),
+        );
+    });
+
+    it('should include visibility in metadata on stage finish', async () => {
+        await observer.onStageStart(
+            'TestStage',
+            context as CodeReviewPipelineContext,
+        );
+
+        await observer.onStageFinish(
+            'TestStage',
+            context as CodeReviewPipelineContext,
+            StageVisibility.PRIMARY,
+        );
+
+        expect(mockService.updateStageLog).toHaveBeenCalledWith(
+            'stage-log-uuid',
+            expect.objectContaining({
+                metadata: expect.objectContaining({
+                    visibility: StageVisibility.PRIMARY,
+                }),
+            }),
+        );
+    });
+
+    it('should include visibility in metadata on stage error', async () => {
+        await observer.onStageStart(
+            'TestStage',
+            context as CodeReviewPipelineContext,
+        );
+
+        await observer.onStageError(
+            'TestStage',
+            new Error('Boom'),
+            context as CodeReviewPipelineContext,
+            StageVisibility.INTERNAL,
+        );
+
+        expect(mockService.updateStageLog).toHaveBeenCalledWith(
+            'stage-log-uuid',
+            expect.objectContaining({
+                metadata: expect.objectContaining({
+                    visibility: StageVisibility.INTERNAL,
+                }),
+            }),
+        );
+    });
+
+    it('should include visibility in metadata on stage skipped', async () => {
+        await observer.onStageStart(
+            'TestStage',
+            context as CodeReviewPipelineContext,
+        );
+
+        await observer.onStageSkipped(
+            'TestStage',
+            'Reason',
+            context as CodeReviewPipelineContext,
+            StageVisibility.PRIMARY,
+        );
+
+        expect(mockService.updateStageLog).toHaveBeenCalledWith(
+            'stage-log-uuid',
+            expect.objectContaining({
+                metadata: expect.objectContaining({
+                    visibility: StageVisibility.PRIMARY,
+                }),
+            }),
         );
     });
 });

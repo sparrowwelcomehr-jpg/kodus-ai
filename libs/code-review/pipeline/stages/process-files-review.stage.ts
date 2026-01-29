@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import pLimit from 'p-limit';
 import { BasePipelineStage } from '@libs/core/infrastructure/pipeline/abstracts/base-stage.abstract';
 import { PipelineError } from '@libs/core/infrastructure/pipeline/interfaces/pipeline-context.interface';
+import { StageVisibility } from '@libs/core/infrastructure/pipeline/enums/stage-visibility.enum';
 
 import {
     ISuggestionService,
@@ -56,6 +57,8 @@ interface FileProcessingResult {
 @Injectable()
 export class ProcessFilesReview extends BasePipelineStage<CodeReviewPipelineContext> {
     readonly stageName = 'FileAnalysisStage';
+    readonly label = 'Analyzing Files';
+    readonly visibility = StageVisibility.PRIMARY;
 
     private readonly concurrencyLimit = 30;
     private readonly logger = createLogger(ProcessFilesReview.name);

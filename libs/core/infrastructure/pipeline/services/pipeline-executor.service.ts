@@ -72,11 +72,10 @@ export class PipelineExecutor<TContext extends PipelineContext> {
             await this.notifyObservers(
                 observers,
                 (obs) =>
-                    obs.onStageStart(
-                        stage.stageName,
-                        context,
-                        stage.visibility,
-                    ),
+                    obs.onStageStart(stage.stageName, context, {
+                        visibility: stage.visibility,
+                        label: stage.label,
+                    }),
                 'onStageStart',
             );
 
@@ -85,7 +84,11 @@ export class PipelineExecutor<TContext extends PipelineContext> {
 
                 await this.notifyObservers(
                     observers,
-                    (obs) => obs.onStageFinish(stage.stageName, context),
+                    (obs) =>
+                        obs.onStageFinish(stage.stageName, context, {
+                            visibility: stage.visibility,
+                            label: stage.label,
+                        }),
                     'onStageFinish',
                 );
 
@@ -112,7 +115,11 @@ export class PipelineExecutor<TContext extends PipelineContext> {
             } catch (error) {
                 await this.notifyObservers(
                     observers,
-                    (obs) => obs.onStageError(stage.stageName, error, context),
+                    (obs) =>
+                        obs.onStageError(stage.stageName, error, context, {
+                            visibility: stage.visibility,
+                            label: stage.label,
+                        }),
                     'onStageError',
                 );
 
@@ -234,6 +241,10 @@ export class PipelineExecutor<TContext extends PipelineContext> {
                         stage.stageName,
                         `Skipping stage '${stage.stageName}' while looking for '${targetStage}'`,
                         context,
+                        {
+                            visibility: stage.visibility,
+                            label: stage.label,
+                        },
                     ),
                 'onStageSkipped',
             );

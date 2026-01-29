@@ -8,7 +8,8 @@ export abstract class BasePipelineStage<
     TContext extends PipelineContext,
 > implements PipelineStage<TContext> {
     abstract stageName: string;
-    visibility: StageVisibility = StageVisibility.PRIMARY;
+    label?: string;
+    visibility: StageVisibility = StageVisibility.SECONDARY;
 
     async execute(context: TContext): Promise<TContext> {
         return await this.executeStage(context);

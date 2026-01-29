@@ -16,6 +16,8 @@ import {
 } from '@libs/core/infrastructure/config/types/general/codeReview.type';
 import { OrganizationAndTeamData } from '@libs/core/infrastructure/config/types/general/organizationAndTeamData';
 import { BasePipelineStage } from '@libs/core/infrastructure/pipeline/abstracts/base-stage.abstract';
+import { PipelineReasons } from '@libs/core/infrastructure/pipeline/constants/pipeline-reasons.const';
+import { StageMessageHelper } from '@libs/core/infrastructure/pipeline/utils/stage-message.helper';
 import { TaskStatus } from '@libs/ee/kodyAST/interfaces/code-ast-analysis.interface';
 import { applyEdit } from '@morphllm/morphsdk';
 import { Inject, Injectable } from '@nestjs/common';
@@ -127,7 +129,12 @@ export class ValidateSuggestionsStage extends BasePipelineStage<CodeReviewPipeli
                 },
             });
 
-            return context;
+            throw new Error(
+                StageMessageHelper.error(
+                    PipelineReasons.SUGGESTIONS.VALIDATION_FAILED.message,
+                    error,
+                ),
+            );
         }
     }
 

@@ -1,6 +1,7 @@
 import { createLogger } from '@kodus/flow';
 import { BasePipelineStage } from '@libs/core/infrastructure/pipeline/abstracts/base-stage.abstract';
 import { Inject, Injectable } from '@nestjs/common';
+import { StageVisibility } from '@libs/core/infrastructure/pipeline/enums/stage-visibility.enum';
 
 import {
     CROSS_FILE_ANALYSIS_SERVICE_TOKEN,
@@ -18,6 +19,8 @@ import { CodeReviewPipelineContext } from '../context/code-review-pipeline.conte
 export class ProcessFilesPrLevelReviewStage extends BasePipelineStage<CodeReviewPipelineContext> {
     private readonly logger = createLogger(ProcessFilesPrLevelReviewStage.name);
     readonly stageName = 'PRLevelReviewStage';
+    readonly label = 'Reviewing Pull Request';
+    readonly visibility = StageVisibility.PRIMARY;
 
     constructor(
         @Inject(KODY_RULES_PR_LEVEL_ANALYSIS_SERVICE_TOKEN)

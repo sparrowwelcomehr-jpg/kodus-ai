@@ -22,20 +22,21 @@ export class CodeReviewPipelineObserver implements IPipelineObserver {
     async onStageStart(
         stageName: string,
         context: CodeReviewPipelineContext,
-        visibility?: StageVisibility,
+        options?: { visibility?: StageVisibility; label?: string },
     ): Promise<void> {
         await this.logStage(
             stageName,
             AutomationStatus.IN_PROGRESS,
             `Starting stage ${stageName}`,
             context,
-            { visibility },
+            options,
         );
     }
 
     async onStageFinish(
         stageName: string,
         context: CodeReviewPipelineContext,
+        options?: { visibility?: StageVisibility; label?: string },
     ): Promise<void> {
         const errors =
             context.errors?.filter((e) => e.stage === stageName) || [];
@@ -51,12 +52,17 @@ export class CodeReviewPipelineObserver implements IPipelineObserver {
             };
         }
 
+        const status =
+            errors.length > 0
+                ? AutomationStatus.PARTIAL_ERROR
+                : AutomationStatus.SUCCESS;
+
         await this.logStage(
             stageName,
-            AutomationStatus.SUCCESS,
+            status,
             `Completed stage ${stageName}`,
             context,
-            { additionalMetadata },
+            { additionalMetadata, ...options },
         );
     }
 
@@ -64,12 +70,14 @@ export class CodeReviewPipelineObserver implements IPipelineObserver {
         stageName: string,
         error: Error,
         context: CodeReviewPipelineContext,
+        options?: { visibility?: StageVisibility; label?: string },
     ): Promise<void> {
         await this.logStage(
             stageName,
             AutomationStatus.ERROR,
             `Error in stage ${stageName}: ${error.message}`,
             context,
+            options,
         );
     }
 
@@ -77,12 +85,14 @@ export class CodeReviewPipelineObserver implements IPipelineObserver {
         stageName: string,
         reason: string,
         context: CodeReviewPipelineContext,
+        options?: { visibility?: StageVisibility; label?: string },
     ): Promise<void> {
         await this.logStage(
             stageName,
             AutomationStatus.SKIPPED,
             `Stage ${stageName} skipped: ${reason}`,
             context,
+            options,
         );
     }
 
@@ -93,10 +103,13 @@ export class CodeReviewPipelineObserver implements IPipelineObserver {
         context: CodeReviewPipelineContext,
         options?: {
             visibility?: StageVisibility;
+            label?: string;
             additionalMetadata?: Record<string, any>;
         },
     ): Promise<void> {
-        let executionUuid = context.pipelineMetadata?.lastExecution?.uuid;
+        let executionUuid =
+            context.pipelineMetadata?.lastExecution?.uuid ||
+            context.correlationId;
         const pullRequestNumber = context.pullRequest?.number;
         const repositoryId = context.repository?.id;
 
@@ -115,8 +128,12 @@ export class CodeReviewPipelineObserver implements IPipelineObserver {
             return;
         }
 
-        const { visibility, additionalMetadata } = options || {};
-        const metadata = visibility ? { visibility } : {};
+        const { visibility, label, additionalMetadata } = options || {};
+        const metadata: any = visibility ? { visibility } : {};
+
+        if (label) {
+            metadata.label = label;
+        }
 
         if (additionalMetadata) {
             Object.assign(metadata, additionalMetadata);
@@ -168,6 +185,7 @@ export class CodeReviewPipelineObserver implements IPipelineObserver {
                     [
                         AutomationStatus.SUCCESS,
                         AutomationStatus.ERROR,
+                        AutomationStatus.PARTIAL_ERROR,
                         AutomationStatus.SKIPPED,
                     ].includes(status)
                 ) {
@@ -176,7 +194,7 @@ export class CodeReviewPipelineObserver implements IPipelineObserver {
 
                 if (metadataToSend) {
                     updateData.metadata = {
-                        ...updateData.metadata,
+                        ...(found.metadata || {}),
                         ...metadataToSend,
                     };
                 }

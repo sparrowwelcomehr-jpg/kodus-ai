@@ -19,6 +19,7 @@ import {
 import { Commit } from '@libs/core/infrastructure/config/types/general/commit.type';
 import { OrganizationAndTeamData } from '@libs/core/infrastructure/config/types/general/organizationAndTeamData';
 import { BasePipelineStage } from '@libs/core/infrastructure/pipeline/abstracts/base-stage.abstract';
+import { StageVisibility } from '@libs/core/infrastructure/pipeline/enums/stage-visibility.enum';
 import {
     DRY_RUN_SERVICE_TOKEN,
     IDryRunService,
@@ -34,6 +35,8 @@ import { ICommit } from '@libs/platformData/domain/pullRequests/interfaces/pullR
 @Injectable()
 export class CreateFileCommentsStage extends BasePipelineStage<CodeReviewPipelineContext> {
     readonly stageName = 'CreateFileCommentsStage';
+    readonly label = 'Posting File Comments';
+    readonly visibility = StageVisibility.PRIMARY;
     private readonly logger = createLogger(CreateFileCommentsStage.name);
 
     constructor(

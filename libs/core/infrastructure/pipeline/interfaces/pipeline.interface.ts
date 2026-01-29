@@ -3,6 +3,7 @@ import { StageVisibility } from '../enums/stage-visibility.enum';
 
 export interface PipelineStage<TContext extends PipelineContext> {
     stageName: string;
+    label?: string;
     visibility: StageVisibility;
     execute(context: TContext): Promise<TContext>;
 }

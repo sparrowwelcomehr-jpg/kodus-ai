@@ -6,6 +6,7 @@ export interface CodeReviewExecutionTimeline {
     updatedAt: Date;
     status: AutomationStatus;
     stageName?: string;
+    stageLabel?: string;
     message?: string;
     metadata?: Record<string, any>;
     finishedAt?: Date;

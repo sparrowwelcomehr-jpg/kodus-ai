@@ -3,16 +3,16 @@ import { PipelineReason } from '../interfaces/pipeline-reason.interface';
 export const PipelineReasons = {
     CONFIG: {
         DISABLED: {
-            message: 'Review Disabled',
-            action: 'Enable automated review in your configuration',
+            message: 'Automated Review is disabled',
+            action: "Enable 'Automated Code Review' in General Settings",
         } as PipelineReason,
         IGNORED_TITLE: {
             message: 'Title Ignored',
-            action: 'Rename PR to remove ignored keywords',
+            action: "Remove keywords defined in 'Ignore title keywords' setting",
         } as PipelineReason,
         DRAFT: {
-            message: 'Draft PR',
-            action: 'Mark as Ready for Review to proceed',
+            message: 'Draft PR Skipped',
+            action: "Enable 'Running on Draft Pull Requests' in settings or mark as Ready",
         } as PipelineReason,
         BRANCH_MISMATCH: {
             message: 'Branch Mismatch',
@@ -25,7 +25,7 @@ export const PipelineReasons = {
         } as PipelineReason,
         ALL_IGNORED: {
             message: 'All Files Ignored',
-            action: 'Check your ignore patterns (.kodusignore)',
+            action: "Check your 'Ignored files' patterns in settings",
         } as PipelineReason,
         TOO_MANY: {
             message: 'Too Many Files',
@@ -48,6 +48,26 @@ export const PipelineReasons = {
         } as PipelineReason,
         LOCKED: {
             message: 'PR is Locked',
+        } as PipelineReason,
+    },
+    SUGGESTIONS: {
+        VALIDATION_FAILED: {
+            message: 'Suggestion Validation Failed',
+            action: 'Contact support if this persists',
+        } as PipelineReason,
+        NO_RESULTS: {
+            message: 'No Validated Suggestions',
+            description: 'Validation filtered out all suggestions',
+        } as PipelineReason,
+    },
+    FINE_TUNING: {
+        DISABLED: {
+            message: 'Fine-Tuning Disabled',
+            description: 'Context skipped as per configuration',
+        } as PipelineReason,
+        NO_MATCHES: {
+            message: 'No Matching Examples',
+            description: 'No relevant fine-tuning examples found',
         } as PipelineReason,
     },
 };

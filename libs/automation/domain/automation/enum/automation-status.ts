@@ -5,6 +5,7 @@ export enum AutomationStatus {
 
     SUCCESS = 'success',
     ERROR = 'error',
+    PARTIAL_ERROR = 'partial_error',
     SKIPPED = 'skipped',
 }
 

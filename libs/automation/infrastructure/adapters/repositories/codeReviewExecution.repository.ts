@@ -187,29 +187,42 @@ export class CodeReviewExecutionRepository<
 
     async findManyByAutomationExecutionIds(
         uuids: string[],
+        options?: {
+            visibility?: string;
+        },
     ): Promise<CodeReviewExecutionEntity<T>[]> {
         if (!uuids.length) {
             return [];
         }
 
         try {
-            const found = await this.codeReviewExecutionRepository.find({
-                select: {
-                    uuid: true,
-                    createdAt: true,
-                    updatedAt: true,
-                    status: true,
-                    stageName: true,
-                    message: true,
-                    automationExecution: {
-                        uuid: true,
-                    },
-                },
-                relations: ['automationExecution'],
-                where: {
-                    automationExecution: { uuid: In(uuids) },
-                } as FindOptionsWhere<CodeReviewExecutionModel>,
-            });
+            const qb = this.codeReviewExecutionRepository
+                .createQueryBuilder('codeReviewExecution')
+                .leftJoin(
+                    'codeReviewExecution.automationExecution',
+                    'automationExecution',
+                )
+                .select([
+                    'codeReviewExecution.uuid',
+                    'codeReviewExecution.createdAt',
+                    'codeReviewExecution.updatedAt',
+                    'codeReviewExecution.status',
+                    'codeReviewExecution.stageName',
+                    'codeReviewExecution.message',
+                    'codeReviewExecution.metadata',
+                    'codeReviewExecution.finishedAt',
+                    'automationExecution.uuid',
+                ])
+                .where('automationExecution.uuid IN (:...uuids)', { uuids });
+
+            if (options?.visibility) {
+                qb.andWhere(
+                    "(codeReviewExecution.metadata ->> 'visibility' IS NULL OR codeReviewExecution.metadata ->> 'visibility' = :visibility)",
+                    { visibility: options.visibility },
+                );
+            }
+
+            const found = await qb.getMany();
 
             return mapSimpleModelsToEntities(found, CodeReviewExecutionEntity);
         } catch (error) {

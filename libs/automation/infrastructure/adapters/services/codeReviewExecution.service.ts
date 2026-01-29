@@ -64,9 +64,13 @@ export class CodeReviewExecutionService<
 
     findManyByAutomationExecutionIds(
         uuids: string[],
+        options?: {
+            visibility?: string;
+        },
     ): Promise<CodeReviewExecutionEntity<T>[]> {
         return this.codeReviewExecutionRepository.findManyByAutomationExecutionIds(
             uuids,
+            options,
         );
     }
 
