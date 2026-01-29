@@ -1,18 +1,3 @@
-/**
- * Integration tests for getChangedFilesSinceLastCommit - merge commit filtering (GitLab).
- *
- * Tests the REAL implementation from GitlabService to ensure merge commits are properly filtered.
- *
- * Scenario:
- * 1. Branch A created from main
- * 2. Branch B created from main, adds 3 files, merged into main
- * 3. On branch A: developer edits 1 file, then merges main (brings 3 files from B)
- * 4. Push on branch A
- *
- * Expected: Only 1 file should be reviewed (the one edited on branch A)
- * Bug: 4 files are reviewed (1 edited + 3 from merge)
- */
-
 import { Test } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
 import {
