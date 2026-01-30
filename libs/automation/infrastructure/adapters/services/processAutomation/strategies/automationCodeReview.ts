@@ -1,4 +1,4 @@
-import { createLogger } from '@kodus/flow';
+import { createLogger, getObservability } from '@kodus/flow';
 import { Inject, Injectable } from '@nestjs/common';
 import { MoreThanOrEqual } from 'typeorm';
 
@@ -77,6 +77,9 @@ export class AutomationCodeReviewService implements Omit<
     }
 
     async run?(payload?: any): Promise<any> {
+        const obs = getObservability();
+        const correlationId = obs.getContext()?.correlationId;
+
         const {
             organizationAndTeamData,
             repository,
@@ -87,6 +90,7 @@ export class AutomationCodeReviewService implements Omit<
             origin,
             action,
             triggerCommentId,
+            userGitId,
         } = payload;
 
         let execution: IAutomationExecution | null = null;
@@ -142,7 +146,7 @@ export class AutomationCodeReviewService implements Omit<
             execution = await this.createAutomationExecution(
                 payload,
                 AutomationStatus.IN_PROGRESS,
-                'Automation started',
+                '',
             );
 
             if (!execution) {
@@ -156,6 +160,26 @@ export class AutomationCodeReviewService implements Omit<
                     },
                 });
                 return 'Could not create code review execution';
+            }
+
+            // Check for pre-validation error passed from UseCase
+            if (payload.validationError) {
+                this.logger.warn({
+                    message: `Automation blocked by validation error: ${payload.validationError.errorType}`,
+                    context: AutomationCodeReviewService.name,
+                    metadata: {
+                        executionUuid: execution.uuid,
+                        validationError: payload.validationError,
+                    },
+                });
+
+                await this.updateAutomationExecution(
+                    execution,
+                    AutomationStatus.ERROR,
+                    `Blocked by validation: ${payload.validationError.errorType}`,
+                    this._buildExecutionData(payload),
+                );
+                return `Automation blocked: ${payload.validationError.errorType}`;
             }
 
             // Fetch the last successful execution to pass to the handler
@@ -184,8 +208,10 @@ export class AutomationCodeReviewService implements Omit<
                     action,
                     execution.uuid,
                     triggerCommentId,
+                    userGitId,
                     undefined, // workflowJobId
                     lastExecution?.dataExecution, // Pass last execution data
+                    correlationId,
                 );
 
             await this._handleExecutionCompletion(execution, result, payload);
@@ -242,22 +268,35 @@ export class AutomationCodeReviewService implements Omit<
         } = payload;
 
         try {
-            return await this.automationExecutionService.createCodeReview(
-                {
-                    status,
-                    dataExecution: {
-                        platformType,
-                        organizationAndTeamData,
+            const result =
+                await this.automationExecutionService.createCodeReview(
+                    {
+                        status,
+                        dataExecution: {
+                            platformType,
+                            organizationAndTeamData,
+                            pullRequestNumber: pullRequest?.number,
+                            repositoryId: repository?.id,
+                        },
+                        teamAutomation: { uuid: teamAutomationId },
+                        origin: origin || 'System',
                         pullRequestNumber: pullRequest?.number,
                         repositoryId: repository?.id,
                     },
-                    teamAutomation: { uuid: teamAutomationId },
-                    origin: origin || 'System',
-                    pullRequestNumber: pullRequest?.number,
-                    repositoryId: repository?.id,
-                },
-                message,
-            );
+                    message,
+                    'Kody Review Started',
+                );
+
+            if (result?.stageLog) {
+                await this.automationExecutionService.updateStageLog(
+                    result.stageLog.uuid,
+                    {
+                        status: AutomationStatus.SUCCESS,
+                    },
+                );
+            }
+
+            return result?.execution;
         } catch (error) {
             // Check for unique constraint violation (PostgreSQL error code 23505)
             const isDuplicateError =
@@ -294,6 +333,7 @@ export class AutomationCodeReviewService implements Omit<
         status: AutomationStatus,
         message: string,
         data: any,
+        stageName?: string,
     ) {
         try {
             const errorMessage = [
@@ -311,6 +351,7 @@ export class AutomationCodeReviewService implements Omit<
                     errorMessage,
                 },
                 message,
+                stageName,
             );
         } catch (error) {
             this.logger.error({
@@ -346,8 +387,9 @@ export class AutomationCodeReviewService implements Omit<
         await this.updateAutomationExecution(
             execution,
             finalStatus,
-            finalMessage,
+            'Process completed',
             newData,
+            'Kody Review Finished',
         );
 
         this.logger.log({

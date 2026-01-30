@@ -106,7 +106,7 @@ export class GitlabService implements Omit<
         private readonly configService: ConfigService,
         private readonly cacheService: CacheService,
         private readonly mcpManagerService?: MCPManagerService,
-    ) {}
+    ) { }
 
     async getPullRequestAuthors(params: {
         organizationAndTeamData: OrganizationAndTeamData;
@@ -621,7 +621,7 @@ export class GitlabService implements Omit<
                                     avatar_url: project.namespace?.avatar_url,
                                     organizationName: project.namespace?.name,
                                     visibility: (project?.visibility ===
-                                    'public'
+                                        'public'
                                         ? 'public'
                                         : 'private') as 'public' | 'private',
                                     selected:
@@ -664,7 +664,7 @@ export class GitlabService implements Omit<
                                     avatar_url: project.namespace?.avatar_url,
                                     organizationName: project.namespace?.name,
                                     visibility: (project?.visibility ===
-                                    'public'
+                                        'public'
                                         ? 'public'
                                         : 'private') as 'public' | 'private',
                                     selected:
@@ -1295,10 +1295,10 @@ export class GitlabService implements Omit<
                         const filesWithChanges = filters?.skipFiles
                             ? []
                             : await this.countChangesInMergeRequest(
-                                  gitlabAPI,
-                                  repo.id,
-                                  pullRequest.iid,
-                              );
+                                gitlabAPI,
+                                repo.id,
+                                pullRequest.iid,
+                            );
 
                         return {
                             id: pullRequest.id,
@@ -1464,38 +1464,61 @@ export class GitlabService implements Omit<
 
         const gitlabAPI = this.instanceGitlabApi(gitlabAuthDetail);
 
+        // 1. Get the SHA of the last analyzed commit
+        const baseSha = lastCommit?.sha;
+
+        // 2. Get all commits in the MR and find the most recent one (head)
         const commits = await gitlabAPI.MergeRequests.allCommits(
             repository.id,
             prNumber,
         );
 
-        const changedFiles = [];
-
-        const newCommits = commits.filter(
-            (commit) =>
-                new Date(commit.created_at) > new Date(lastCommit.created_at),
+        const sortedCommits = [...commits].sort(
+            (a, b) =>
+                new Date(a.created_at).getTime() -
+                new Date(b.created_at).getTime(),
         );
 
-        for (const commit of newCommits) {
-            const commitDiff = await gitlabAPI.Commits.showDiff(
-                repository.id,
-                commit.id,
-            );
-            changedFiles.push(...commitDiff);
+        const headSha = sortedCommits[sortedCommits?.length - 1]?.id;
+
+        if (!headSha || !baseSha || baseSha === headSha) {
+            return [];
         }
 
-        return changedFiles.map((file) => {
-            const changeCount = this.countChanges(file.diff);
+        // 3. Compare the two commits to get only the new changes
+        // This returns the diff between the last reviewed commit and the latest commit
+        const comparison = await gitlabAPI.Repositories.compare(
+            repository.id,
+            baseSha,
+            headSha,
+        );
 
-            return {
-                filename: file.new_path,
-                status: this.mapGitlabStatus(file),
-                additions: changeCount.adds,
-                deletions: changeCount.deletes,
-                changes: changeCount.adds + changeCount.deletes,
-                patch: file.diff,
-            };
-        });
+        const diffs = comparison.diffs || [];
+
+        // 4. Get the MR diffs to filter out files that came from merge commits
+        // MergeRequests.allDiffs only returns files that belong to the MR (relative to target branch)
+        const mrDiffs = await gitlabAPI.MergeRequests.allDiffs(
+            repository.id,
+            prNumber,
+        );
+
+        const mrFileNames = new Set(mrDiffs.map((f) => f.new_path));
+
+        // 5. Keep only files that exist in both compare AND MR diffs list
+        return diffs
+            .filter((file) => mrFileNames.has(file.new_path))
+            .map((file) => {
+                const changeCount = this.countChanges(file.diff);
+
+                return {
+                    filename: file.new_path,
+                    status: this.mapGitlabStatus(file),
+                    additions: changeCount.adds,
+                    deletions: changeCount.deletes,
+                    changes: changeCount.adds + changeCount.deletes,
+                    patch: file.diff,
+                };
+            });
     }
 
     /*************  ✨ Codeium Command ⭐  *************/
@@ -1540,9 +1563,9 @@ export class GitlabService implements Omit<
             : '';
         const codeBlock = lineComment?.body?.improvedCode
             ? this.formatCodeBlock(
-                  repository?.language?.toLowerCase(),
-                  lineComment?.body?.improvedCode,
-              )
+                repository?.language?.toLowerCase(),
+                lineComment?.body?.improvedCode,
+            )
             : '';
         const suggestionContent = lineComment?.body?.suggestionContent || '';
         const actionStatement = lineComment?.body?.actionStatement
@@ -1570,7 +1593,7 @@ export class GitlabService implements Omit<
             copyPrompt,
             this.formatSub(translations.talkToKody),
             this.formatSub(translations.feedback) +
-                '<!-- kody-codereview -->&#8203;\n&#8203;',
+            '<!-- kody-codereview -->&#8203;\n&#8203;',
         ]
             .join('\n')
             .trim();
@@ -3170,8 +3193,8 @@ export class GitlabService implements Omit<
                         pr.state === GitlabPullRequestState.OPENED
                             ? PullRequestState.OPENED
                             : pr.state === GitlabPullRequestState.CLOSED
-                              ? PullRequestState.CLOSED
-                              : PullRequestState.ALL,
+                                ? PullRequestState.CLOSED
+                                : PullRequestState.ALL,
                     pull_number: pr.iid,
                     project_id: pr.project_id,
                     prURL: pr.web_url,
@@ -3234,7 +3257,7 @@ export class GitlabService implements Omit<
                     const firstDiscussionComment = discussion.notes[0];
                     const isDiscussionResolved: boolean =
                         firstDiscussionComment.resolved &&
-                        firstDiscussionComment.resolved === true
+                            firstDiscussionComment.resolved === true
                             ? true
                             : false;
 
@@ -3498,12 +3521,12 @@ export class GitlabService implements Omit<
         organizationAndTeamData: OrganizationAndTeamData;
         commentId: string;
         reason?:
-            | 'ABUSE'
-            | 'OFF_TOPIC'
-            | 'OUTDATED'
-            | 'RESOLVED'
-            | 'DUPLICATE'
-            | 'SPAM';
+        | 'ABUSE'
+        | 'OFF_TOPIC'
+        | 'OUTDATED'
+        | 'RESOLVED'
+        | 'DUPLICATE'
+        | 'SPAM';
     }): Promise<any | null> {
         throw new Error('Method not implemented.');
     }

@@ -1,4 +1,5 @@
 import { BasePipelineStage } from '@libs/core/infrastructure/pipeline/abstracts/base-stage.abstract';
+import { StageVisibility } from '@libs/core/infrastructure/pipeline/enums/stage-visibility.enum';
 import { Injectable } from '@nestjs/common';
 import { CodeManagementService } from '@libs/platform/infrastructure/adapters/services/codeManagement.service';
 import { createLogger } from '@kodus/flow';
@@ -11,6 +12,8 @@ import { CodeReviewPipelineContext } from '../context/code-review-pipeline.conte
 @Injectable()
 export class RequestChangesOrApproveStage extends BasePipelineStage<CodeReviewPipelineContext> {
     readonly stageName = 'RequestChangesOrApproveStage';
+    readonly label = 'Finalizing Review';
+    readonly visibility = StageVisibility.PRIMARY;
 
     private readonly logger = createLogger(RequestChangesOrApproveStage.name);
 

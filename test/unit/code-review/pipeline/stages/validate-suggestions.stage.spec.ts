@@ -51,10 +51,16 @@ describe('ValidateSuggestionsStage', () => {
         teamId: 'team-456',
     };
 
-    const createBaseContext = (overrides: Partial<CodeReviewPipelineContext> = {}): CodeReviewPipelineContext => ({
+    const createBaseContext = (
+        overrides: Partial<CodeReviewPipelineContext> = {},
+    ): CodeReviewPipelineContext => ({
         dryRun: { enabled: false },
         organizationAndTeamData: mockOrganizationAndTeamData as any,
-        repository: { id: 'repo-1', name: 'test-repo', language: 'typescript' } as any,
+        repository: {
+            id: 'repo-1',
+            name: 'test-repo',
+            language: 'typescript',
+        } as any,
         branch: 'main',
         pullRequest: {
             number: 123,
@@ -89,7 +95,10 @@ describe('ValidateSuggestionsStage', () => {
         const module: TestingModule = await Test.createTestingModule({
             providers: [
                 ValidateSuggestionsStage,
-                { provide: AST_ANALYSIS_SERVICE_TOKEN, useValue: mockAstAnalysisService },
+                {
+                    provide: AST_ANALYSIS_SERVICE_TOKEN,
+                    useValue: mockAstAnalysisService,
+                },
             ],
         }).compile();
 
@@ -109,7 +118,9 @@ describe('ValidateSuggestionsStage', () => {
 
             const context = createBaseContext({
                 validSuggestions: [{ id: 's1', improvedCode: 'const x = 1;' }],
-                changedFiles: [{ filename: 'test.ts', fileContent: 'var x = 1;' } as any],
+                changedFiles: [
+                    { filename: 'test.ts', fileContent: 'var x = 1;' } as any,
+                ],
             });
 
             const result = await (stage as any).executeStage(context);
@@ -126,7 +137,9 @@ describe('ValidateSuggestionsStage', () => {
                     enableCommittableSuggestions: false,
                 } as any,
                 validSuggestions: [{ id: 's1', improvedCode: 'const x = 1;' }],
-                changedFiles: [{ filename: 'test.ts', fileContent: 'var x = 1;' } as any],
+                changedFiles: [
+                    { filename: 'test.ts', fileContent: 'var x = 1;' } as any,
+                ],
             });
 
             const result = await (stage as any).executeStage(context);
@@ -140,7 +153,9 @@ describe('ValidateSuggestionsStage', () => {
             const context = createBaseContext({
                 platformType: PlatformType.GITLAB,
                 validSuggestions: [{ id: 's1', improvedCode: 'const x = 1;' }],
-                changedFiles: [{ filename: 'test.ts', fileContent: 'var x = 1;' } as any],
+                changedFiles: [
+                    { filename: 'test.ts', fileContent: 'var x = 1;' } as any,
+                ],
             });
 
             const result = await (stage as any).executeStage(context);
@@ -153,7 +168,9 @@ describe('ValidateSuggestionsStage', () => {
 
             const context = createBaseContext({
                 validSuggestions: [],
-                changedFiles: [{ filename: 'test.ts', fileContent: 'var x = 1;' } as any],
+                changedFiles: [
+                    { filename: 'test.ts', fileContent: 'var x = 1;' } as any,
+                ],
             });
 
             const result = await (stage as any).executeStage(context);
@@ -193,13 +210,17 @@ describe('ValidateSuggestionsStage', () => {
                 validSuggestions: [
                     { id: 's1', improvedCode: longCode, llmPrompt: 'test' },
                 ],
-                changedFiles: [{ filename: 'test.ts', fileContent: 'var x;' } as any],
+                changedFiles: [
+                    { filename: 'test.ts', fileContent: 'var x;' } as any,
+                ],
             });
 
             const result = await (stage as any).executeStage(context);
 
             // Suggestion should not be marked as committable due to being too long
-            const suggestion = result.validSuggestions.find(s => s.id === 's1');
+            const suggestion = result.validSuggestions.find(
+                (s) => s.id === 's1',
+            );
             expect(suggestion?.isCommittable).toBeUndefined();
         });
 
@@ -216,12 +237,16 @@ describe('ValidateSuggestionsStage', () => {
                 validSuggestions: [
                     { id: 's1', improvedCode: manyLines, llmPrompt: 'test' },
                 ],
-                changedFiles: [{ filename: 'test.ts', fileContent: 'var x;' } as any],
+                changedFiles: [
+                    { filename: 'test.ts', fileContent: 'var x;' } as any,
+                ],
             });
 
             const result = await (stage as any).executeStage(context);
 
-            const suggestion = result.validSuggestions.find(s => s.id === 's1');
+            const suggestion = result.validSuggestions.find(
+                (s) => s.id === 's1',
+            );
             expect(suggestion?.isCommittable).toBeUndefined();
         });
 
@@ -233,14 +258,22 @@ describe('ValidateSuggestionsStage', () => {
 
             const context = createBaseContext({
                 validSuggestions: [
-                    { id: 's1', improvedCode: 'const x = 1;', llmPrompt: 'test' },
+                    {
+                        id: 's1',
+                        improvedCode: 'const x = 1;',
+                        llmPrompt: 'test',
+                    },
                 ],
-                changedFiles: [{ filename: 'test.ts', fileContent: 'var x;' } as any],
+                changedFiles: [
+                    { filename: 'test.ts', fileContent: 'var x;' } as any,
+                ],
             });
 
             const result = await (stage as any).executeStage(context);
 
-            const suggestion = result.validSuggestions.find(s => s.id === 's1');
+            const suggestion = result.validSuggestions.find(
+                (s) => s.id === 's1',
+            );
             expect(suggestion?.isCommittable).toBeUndefined();
         });
 
@@ -250,14 +283,18 @@ describe('ValidateSuggestionsStage', () => {
                 reason: null,
             });
 
-            mockAstAnalysisService.startValidate.mockResolvedValue({ taskId: 'task-1' });
+            mockAstAnalysisService.startValidate.mockResolvedValue({
+                taskId: 'task-1',
+            });
             mockAstAnalysisService.awaitTask.mockResolvedValue({
                 task: { status: TaskStatus.TASK_STATUS_COMPLETED },
             });
             mockAstAnalysisService.getValidate.mockResolvedValue({
                 results: [{ id: 's1', isValid: true, filePath: 'test.ts' }],
             });
-            mockAstAnalysisService.validateWithLLM.mockResolvedValue({ isValid: true });
+            mockAstAnalysisService.validateWithLLM.mockResolvedValue({
+                isValid: true,
+            });
 
             (applyEdit as jest.Mock).mockResolvedValue({
                 mergedCode: 'const x = 1;',
@@ -277,17 +314,21 @@ describe('ValidateSuggestionsStage', () => {
                         llmPrompt: 'Use const',
                     },
                 ],
-                changedFiles: [{
-                    filename: 'test.ts',
-                    fileContent: 'var x;',
-                } as any],
+                changedFiles: [
+                    {
+                        filename: 'test.ts',
+                        fileContent: 'var x;',
+                    } as any,
+                ],
             });
 
             const result = await (stage as any).executeStage(context);
 
-            const suggestion = result.validSuggestions.find(s => s.id === 's1');
+            const suggestion = result.validSuggestions.find(
+                (s) => s.id === 's1',
+            );
             expect(suggestion?.isCommittable).toBe(true);
-            expect(suggestion?.validatedCode).toBeDefined();
+            expect(suggestion?.validatedData).toBeDefined();
         });
     });
 
@@ -342,7 +383,10 @@ describe('ValidateSuggestionsStage', () => {
                 { filename: 'b.ts', fileContent: 'var b;' },
             ];
 
-            const result = (stage as any).groupSuggestionsByFile(suggestions, files);
+            const result = (stage as any).groupSuggestionsByFile(
+                suggestions,
+                files,
+            );
 
             expect(Object.keys(result)).toHaveLength(2);
             expect(result['a.ts'].suggestions).toHaveLength(2);
@@ -355,11 +399,12 @@ describe('ValidateSuggestionsStage', () => {
                 { id: 's2', relevantFile: 'nonexistent.ts' },
             ];
 
-            const files = [
-                { filename: 'a.ts', fileContent: 'var a;' },
-            ];
+            const files = [{ filename: 'a.ts', fileContent: 'var a;' }];
 
-            const result = (stage as any).groupSuggestionsByFile(suggestions, files);
+            const result = (stage as any).groupSuggestionsByFile(
+                suggestions,
+                files,
+            );
 
             expect(Object.keys(result)).toHaveLength(1);
             expect(result['a.ts'].suggestions).toHaveLength(1);
@@ -378,7 +423,11 @@ describe('ValidateSuggestionsStage', () => {
 
             const result = (stage as any).getFormattedSuggestionFromDiff(diff);
 
-            expect(result).toBe('const x = 1;\nconst y = 2;');
+            expect(result).toEqual({
+                code: 'const x = 1;\nconst y = 2;',
+                startLine: 1,
+                endLine: 1,
+            });
         });
 
         it('should return null for multi-file diffs', () => {
@@ -434,14 +483,20 @@ ${manyAddedLines}`;
 
         it('should handle AST simplicity check errors gracefully', async () => {
             mockAstAnalysisService.checkSuggestionSimplicity.mockRejectedValue(
-                new Error('AST service unavailable')
+                new Error('AST service unavailable'),
             );
 
             const context = createBaseContext({
                 validSuggestions: [
-                    { id: 's1', improvedCode: 'const x = 1;', llmPrompt: 'test' },
+                    {
+                        id: 's1',
+                        improvedCode: 'const x = 1;',
+                        llmPrompt: 'test',
+                    },
                 ],
-                changedFiles: [{ filename: 'test.ts', fileContent: 'var x;' } as any],
+                changedFiles: [
+                    { filename: 'test.ts', fileContent: 'var x;' } as any,
+                ],
             });
 
             const result = await (stage as any).executeStage(context);
@@ -456,7 +511,9 @@ ${manyAddedLines}`;
                 reason: null,
             });
 
-            (applyEdit as jest.Mock).mockRejectedValue(new Error('MorphLLM error'));
+            (applyEdit as jest.Mock).mockRejectedValue(
+                new Error('MorphLLM error'),
+            );
 
             const context = createBaseContext({
                 validSuggestions: [
@@ -467,10 +524,12 @@ ${manyAddedLines}`;
                         llmPrompt: 'Use const',
                     },
                 ],
-                changedFiles: [{
-                    filename: 'test.ts',
-                    fileContent: 'var x;',
-                } as any],
+                changedFiles: [
+                    {
+                        filename: 'test.ts',
+                        fileContent: 'var x;',
+                    } as any,
+                ],
             });
 
             const result = await (stage as any).executeStage(context);
@@ -485,7 +544,9 @@ ${manyAddedLines}`;
                 reason: null,
             });
 
-            mockAstAnalysisService.startValidate.mockResolvedValue({ taskId: 'task-1' });
+            mockAstAnalysisService.startValidate.mockResolvedValue({
+                taskId: 'task-1',
+            });
             mockAstAnalysisService.awaitTask.mockResolvedValue({
                 task: { status: TaskStatus.TASK_STATUS_FAILED },
             });
@@ -508,16 +569,17 @@ ${manyAddedLines}`;
                         llmPrompt: 'Use const',
                     },
                 ],
-                changedFiles: [{
-                    filename: 'test.ts',
-                    fileContent: 'var x;',
-                } as any],
+                changedFiles: [
+                    {
+                        filename: 'test.ts',
+                        fileContent: 'var x;',
+                    } as any,
+                ],
             });
 
-            const result = await (stage as any).executeStage(context);
-
-            // Should return context without crashing
-            expect(result).toBeDefined();
+            await expect((stage as any).executeStage(context)).rejects.toThrow(
+                /Suggestion Validation Failed/,
+            );
         });
     });
 });

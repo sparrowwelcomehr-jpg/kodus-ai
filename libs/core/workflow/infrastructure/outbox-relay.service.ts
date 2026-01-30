@@ -1,9 +1,11 @@
 import * as os from 'os';
 import { createLogger } from '@kodus/flow';
 import { ObservabilityService } from '@libs/core/log/observability.service';
+import { IncidentManagerService } from '@libs/core/infrastructure/incident/incident-manager.service';
 import {
     Injectable,
     Inject,
+    Optional,
     OnApplicationBootstrap,
     OnModuleDestroy,
 } from '@nestjs/common';
@@ -98,6 +100,8 @@ export class OutboxRelayService
         @Inject(MESSAGE_BROKER_SERVICE_TOKEN)
         private readonly messageBroker: IMessageBrokerService,
         private readonly observability: ObservabilityService,
+        @Optional()
+        private readonly incidentManager?: IncidentManagerService,
     ) {}
 
     onApplicationBootstrap() {
@@ -222,6 +226,17 @@ export class OutboxRelayService
                 context: OutboxRelayService.name,
             });
         }
+
+        // Ping heartbeat to signal outbox relay is alive
+        this.incidentManager
+            ?.pingHeartbeat('API_BETTERSTACK_HEARTBEAT_OUTBOX_URL')
+            .catch((err) => {
+                this.logger.error({
+                    message: 'Failed to ping outbox heartbeat',
+                    context: OutboxRelayService.name,
+                    error: err instanceof Error ? err : undefined,
+                });
+            });
     }
 
     /**
@@ -298,6 +313,20 @@ export class OutboxRelayService
                                         'Worker crashes, memory issues, or job timeouts',
                                 },
                             });
+
+                            this.incidentManager
+                                ?.failHeartbeat(
+                                    'API_BETTERSTACK_HEARTBEAT_OUTBOX_URL',
+                                    `High inbox reclaim rate for ${consumerId}: ${reclaimed} stale messages reclaimed. Possible cause: worker crashes, memory issues, or job timeouts.`,
+                                )
+                                .catch((err) => {
+                                    this.logger.error({
+                                        message: 'Failed to report outbox heartbeat failure',
+                                        context: OutboxRelayService.name,
+                                        error: err instanceof Error ? err : undefined,
+                                        metadata: { consumerId, reclaimed },
+                                    });
+                                });
                         }
                     }
                 }
@@ -384,8 +413,7 @@ export class OutboxRelayService
                     'workflow.outbox.max_attempts': this.maxAttemptsOutbox,
                 });
 
-                // Note: message.job is not populated by RETURNING * (only job_id column)
-                // Always use payload.jobId which is set during enqueue
+                // Extract jobId before try-catch so it's accessible in catch block
                 const rawPayload = message?.payload as unknown as
                     | MessagePayload<MessagePayloadContent>
                     | MessagePayloadContent
@@ -401,9 +429,13 @@ export class OutboxRelayService
                 const workflowType = payloadContent?.workflowType;
                 const jobId = payloadContent?.jobId;
 
-                span.setAttributes({
-                    'workflow.outbox.job.id': jobId,
-                });
+                try {
+                    // Note: message.job is not populated by RETURNING * (only job_id column)
+                    // Always use payload.jobId which is set during enqueue
+
+                    span.setAttributes({
+                        'workflow.outbox.job.id': jobId,
+                    });
 
                 try {
                     await this.messageBroker.publishMessage(
@@ -494,6 +526,20 @@ export class OutboxRelayService
                                 maxAttempts: this.maxAttemptsOutbox,
                             },
                         });
+
+                        this.incidentManager
+                            ?.failHeartbeat(
+                                'API_BETTERSTACK_HEARTBEAT_OUTBOX_URL',
+                                `Outbox message permanently failed: ${message.uuid} (job: ${jobId || 'N/A'}) after ${this.maxAttemptsOutbox} attempts. Exchange: ${message.exchange}, Routing: ${message.routingKey}. Error: ${error.message}`,
+                            )
+                            .catch((err) => {
+                                this.logger.error({
+                                    message: 'Failed to report outbox heartbeat failure',
+                                    context: OutboxRelayService.name,
+                                    error: err instanceof Error ? err : undefined,
+                                    metadata: { messageId: message.uuid, jobId },
+                                });
+                            });
                     } else {
                         // Schedule for retry using centralized backoff
                         const delayMs = calculateBackoffInterval(

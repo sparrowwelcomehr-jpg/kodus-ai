@@ -31,11 +31,13 @@ import { FinalizeGithubCheckStage } from '@libs/code-review/pipeline/stages/fina
 import { ProcessFilesPrLevelReviewStage } from '@libs/code-review/pipeline/stages/process-files-pr-level-review.stage';
 import { ResolveConfigStage } from '@libs/code-review/pipeline/stages/resolve-config.stage';
 import { ValidateNewCommitsStage } from '@libs/code-review/pipeline/stages/validate-new-commits.stage';
+import { ValidatePrerequisitesStage } from '@libs/code-review/pipeline/stages/validate-prerequisites.stage';
 import { ValidateSuggestionsStage } from '@libs/code-review/pipeline/stages/validate-suggestions.stage';
 
 @Injectable()
 export class CodeReviewPipelineStrategyEE implements IPipelineStrategy<CodeReviewPipelineContext> {
     constructor(
+        private readonly validatePrerequisitesStage: ValidatePrerequisitesStage,
         private readonly validateNewCommitsStage: ValidateNewCommitsStage,
         private readonly resolveConfigStage: ResolveConfigStage,
         private readonly validateConfigStage: ValidateConfigStage,
@@ -65,6 +67,7 @@ export class CodeReviewPipelineStrategyEE implements IPipelineStrategy<CodeRevie
 
     configureStages(): PipelineStage<CodeReviewPipelineContext>[] {
         return [
+            this.validatePrerequisitesStage,
             this.validateNewCommitsStage,
             this.resolveConfigStage,
             this.validateConfigStage,

@@ -141,23 +141,27 @@ export class SimpleLogger {
         const contextStr = this.extractContextInfo(context);
         const baseLogger = getPinoLogger();
 
-        const childLogger = baseLogger.child({
-            serviceName: effectiveServiceName,
-            context: contextStr,
-        });
+        // Standard logging to stdout (respects API_LOG_LEVEL)
+        if (baseLogger.isLevelEnabled(level)) {
+            const childLogger = baseLogger.child({
+                serviceName: effectiveServiceName,
+                context: contextStr,
+            });
 
-        const logObject = this.buildLogObject(
-            effectiveServiceName,
-            metadata,
-            error,
-        );
+            const logObject = this.buildLogObject(
+                effectiveServiceName,
+                metadata,
+                error,
+            );
 
-        if (error) {
-            childLogger[level]({ ...logObject, err: error }, message);
-        } else {
-            childLogger[level](logObject, message);
+            if (error) {
+                childLogger[level]({ ...logObject, err: error }, message);
+            } else {
+                childLogger[level](logObject, message);
+            }
         }
 
+        // Processors run regardless of stdout log level
         for (const processor of globalLogProcessors) {
             try {
                 processor.process(

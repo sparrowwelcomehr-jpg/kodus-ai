@@ -35,7 +35,7 @@ import { OrganizationAndTeamData } from '@libs/core/infrastructure/config/types/
 import { ObservabilityService } from '@libs/core/log/observability.service';
 import { CodeManagementService } from '@libs/platform/infrastructure/adapters/services/codeManagement.service';
 
-import { ASTValidateCodeRequest } from '@libs/code-review/domain/types/astValidate.type';
+import { SyntaxCheckRequest } from '@libs/code-review/domain/types/astValidate.type';
 import {
     checkSuggestionSimplicitySchema,
     prompt_checkSuggestionSimplicity_system,
@@ -658,12 +658,12 @@ export class CodeAstAnalysisService implements IASTAnalysisService {
         }
     }
 
-    async startValidate(payload: {
-        files: ASTValidateCodeRequest;
-    }): Promise<{ taskId: string }> {
+    async startValidate(
+        payload: SyntaxCheckRequest,
+    ): Promise<{ taskId: string }> {
         const taskId = await this.astAxios.post(
             '/api/ast/validate-code/initialize',
-            { ...payload.files },
+            { ...payload },
         );
 
         return taskId;
@@ -868,6 +868,7 @@ export class CodeAstAnalysisService implements IASTAnalysisService {
                             provider,
                             fallbackProvider,
                             runName,
+                            suggestionId: suggestion.id,
                         })
                         .setRunName(runName)
                         .execute();

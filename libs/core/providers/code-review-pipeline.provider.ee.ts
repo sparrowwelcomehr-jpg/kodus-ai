@@ -10,6 +10,7 @@ import { environment } from '@libs/ee/configs/environment';
 import { Provider } from '@nestjs/common';
 import { CodeReviewPipelineStrategyEE } from '@libs/ee/codeReview/strategies/code-review-pipeline.strategy.ee';
 import { createLogger } from '@kodus/flow';
+import { CodeReviewPipelineObserver } from '@libs/code-review/infrastructure/observers/code-review-pipeline.observer';
 
 export const CODE_REVIEW_PIPELINE_TOKEN = 'CODE_REVIEW_PIPELINE';
 
@@ -20,6 +21,7 @@ export const codeReviewPipelineProvider: Provider = {
     useFactory: (
         ceStrategy: CodeReviewPipelineStrategy,
         eeStrategy: CodeReviewPipelineStrategyEE,
+        observer: CodeReviewPipelineObserver,
     ): IPipeline<CodeReviewPipelineContext> => {
         // INTERNAL FORK: Always use Enterprise Edition strategy (Heavy Mode)
         const isCloud = true; // Force EE/Heavy mode
@@ -44,9 +46,16 @@ export const codeReviewPipelineProvider: Provider = {
                     context,
                     stages,
                     strategy.getPipelineName(),
+                    undefined,
+                    undefined,
+                    [observer],
                 )) as CodeReviewPipelineContext;
             },
         };
     },
-    inject: [CodeReviewPipelineStrategy, CodeReviewPipelineStrategyEE],
+    inject: [
+        CodeReviewPipelineStrategy,
+        CodeReviewPipelineStrategyEE,
+        CodeReviewPipelineObserver,
+    ],
 };

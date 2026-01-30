@@ -108,9 +108,12 @@ test.json
 specs
 .cursor/rules/bmad/
 .specify
+.opencode
 .build_cache
 .opencode
 .cursor
+.claude
+.codex
 
 # ESLint Cache
 .eslintcache

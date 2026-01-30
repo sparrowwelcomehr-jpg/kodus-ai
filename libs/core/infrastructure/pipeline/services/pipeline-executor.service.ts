@@ -4,13 +4,15 @@ import { PipelineContext } from '../interfaces/pipeline-context.interface';
 import { createLogger } from '@kodus/flow';
 import { PipelineStage } from '../interfaces/pipeline.interface';
 import { AutomationStatus } from '@libs/automation/domain/automation/enum/automation-status';
+import { MetricsCollectorService } from '@libs/core/infrastructure/metrics/metrics-collector.service';
+import { IPipelineObserver } from '../interfaces/pipeline-observer.interface';
 
 type SkipDecision = 'EXECUTE_STAGE' | 'SKIP_STAGE' | 'ABORT_PIPELINE';
 
 export class PipelineExecutor<TContext extends PipelineContext> {
     private readonly logger = createLogger(PipelineExecutor.name);
 
-    constructor() {}
+    constructor(private readonly metricsCollector?: MetricsCollectorService) {}
 
     async execute(
         context: TContext,
@@ -18,6 +20,7 @@ export class PipelineExecutor<TContext extends PipelineContext> {
         pipelineName = 'UnnamedPipeline',
         parentPipelineId?: string,
         rootPipelineId?: string,
+        observers: IPipelineObserver[] = [],
     ): Promise<TContext> {
         const pipelineId = uuid();
 
@@ -45,11 +48,12 @@ export class PipelineExecutor<TContext extends PipelineContext> {
         for (const stage of stages) {
             // Check if we need to handle skip/jump logic
             if (context.statusInfo.status === AutomationStatus.SKIPPED) {
-                const result = this.handleSkipOrJump(
+                const result = await this.handleSkipOrJump(
                     context,
                     stage,
                     pipelineName,
                     pipelineId,
+                    observers,
                 );
 
                 context = result.newContext;
@@ -65,17 +69,33 @@ export class PipelineExecutor<TContext extends PipelineContext> {
 
             const start = Date.now();
 
+            await this.notifyObservers(
+                observers,
+                (obs) =>
+                    obs.onStageStart(stage.stageName, context, {
+                        visibility: stage.visibility,
+                        label: stage.label,
+                    }),
+                'onStageStart',
+            );
+
             try {
                 context = await stage.execute(context);
 
+                await this.notifyStageCompletion(stage, context, observers);
+
+                const stageDurationMs = Date.now() - start;
+                this.metricsCollector?.recordHistogram(
+                    'pipeline_stage_duration_ms',
+                    stageDurationMs,
+                    { pipeline: pipelineName, stage: stage.stageName },
+                );
+
                 this.logger.log({
-                    message: `Stage '${stage.stageName}' completed in ${
-                        Date.now() - start
-                    }ms: ${pipelineId}`,
+                    message: `Stage '${stage.stageName}' completed in ${stageDurationMs}ms: ${pipelineId}`,
                     context: PipelineExecutor.name,
                     serviceName: PipelineExecutor.name,
                     metadata: {
-                        task: (context as any)?.tasks ?? null,
                         ...context?.pipelineMetadata,
                         stage: stage.stageName,
                         correlationId: (context as any)?.correlationId ?? null,
@@ -85,6 +105,22 @@ export class PipelineExecutor<TContext extends PipelineContext> {
                     },
                 });
             } catch (error) {
+                await this.notifyObservers(
+                    observers,
+                    (obs) =>
+                        obs.onStageError(stage.stageName, error, context, {
+                            visibility: stage.visibility,
+                            label: stage.label,
+                        }),
+                    'onStageError',
+                );
+
+                this.metricsCollector?.recordCounter(
+                    'pipeline_stage_errors_total',
+                    1,
+                    { pipeline: pipelineName, stage: stage.stageName },
+                );
+
                 this.logger.error({
                     message: `Stage '${stage.stageName}' failed: ${error.message}`,
                     context: PipelineExecutor.name,
@@ -143,12 +179,65 @@ export class PipelineExecutor<TContext extends PipelineContext> {
         return context;
     }
 
-    private handleSkipOrJump(
+    private async notifyStageCompletion(
+        stage: PipelineStage<TContext>,
+        context: TContext,
+        observers: IPipelineObserver[],
+    ): Promise<void> {
+        if (context.statusInfo.status === AutomationStatus.SKIPPED) {
+            await this.notifyObservers(
+                observers,
+                (obs) =>
+                    obs.onStageSkipped(
+                        stage.stageName,
+                        context.statusInfo.message || 'Stage skipped',
+                        context,
+                        {
+                            visibility: stage.visibility,
+                            label: stage.label,
+                        },
+                    ),
+                'onStageSkipped',
+            );
+        } else {
+            await this.notifyObservers(
+                observers,
+                (obs) =>
+                    obs.onStageFinish(stage.stageName, context, {
+                        visibility: stage.visibility,
+                        label: stage.label,
+                    }),
+                'onStageFinish',
+            );
+        }
+    }
+
+    private async notifyObservers(
+        observers: IPipelineObserver[],
+        callback: (observer: IPipelineObserver) => Promise<void>,
+        actionName: string,
+    ): Promise<void> {
+        for (const observer of observers) {
+            try {
+                await callback(observer);
+            } catch (error) {
+                this.logger.error({
+                    message: `Observer ${actionName} failed`,
+                    error: error as Error,
+                    context: PipelineExecutor.name,
+                    serviceName: PipelineExecutor.name,
+                });
+            }
+        }
+    }
+
+    private async handleSkipOrJump(
         context: TContext,
         stage: PipelineStage<TContext>,
         pipelineName: string,
         pipelineId: string,
-    ): { decision: SkipDecision; newContext: TContext } {
+        observers: IPipelineObserver[],
+    ): Promise<{ decision: SkipDecision; newContext: TContext }> {
         const targetStage = context.statusInfo.jumpToStage;
 
         if (!targetStage) {
@@ -183,18 +272,6 @@ export class PipelineExecutor<TContext extends PipelineContext> {
             });
             return { decision: 'SKIP_STAGE', newContext: context };
         }
-
-        this.logger.log({
-            message: `Resuming pipeline execution at stage: ${stage.stageName}`,
-            context: PipelineExecutor.name,
-            serviceName: PipelineExecutor.name,
-            metadata: {
-                ...context?.pipelineMetadata,
-                stage: stage.stageName,
-                correlationId: (context as any)?.correlationId ?? null,
-                status: context.statusInfo,
-            },
-        });
 
         const newContext = produce(context, (draft) => {
             draft.statusInfo.skippedReason = {

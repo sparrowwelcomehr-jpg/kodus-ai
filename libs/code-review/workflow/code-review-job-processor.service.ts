@@ -1,5 +1,5 @@
 import { createLogger } from '@kodus/flow';
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, Optional } from '@nestjs/common';
 
 import { JobStatus } from '@libs/core/workflow/domain/enums/job-status.enum';
 import {
@@ -9,6 +9,8 @@ import {
 import { IJobProcessorService } from '@libs/core/workflow/domain/contracts/job-processor.service.contract';
 import { ErrorClassification } from '@libs/core/workflow/domain/enums/error-classification.enum';
 import { RunCodeReviewAutomationUseCase } from '@libs/ee/automation/runCodeReview.use-case';
+import { MetricsCollectorService } from '@libs/core/infrastructure/metrics/metrics-collector.service';
+import { EnqueueCodeReviewJobInput } from '@libs/core/workflow/application/use-cases/enqueue-code-review-job.use-case';
 
 @Injectable()
 export class CodeReviewJobProcessorService implements IJobProcessorService {
@@ -18,6 +20,8 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
         @Inject(WORKFLOW_JOB_REPOSITORY_TOKEN)
         private readonly jobRepository: IWorkflowJobRepository,
         private readonly runCodeReviewAutomationUseCase: RunCodeReviewAutomationUseCase,
+        @Optional()
+        private readonly metricsCollector?: MetricsCollectorService,
     ) {}
 
     async process(jobId: string): Promise<void> {
@@ -28,15 +32,14 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
         }
 
         const correlationId = job.correlationId;
-        if (!correlationId) {
-            throw new Error(`Job ${jobId} missing correlationId`);
-        }
 
         this.logger.log({
             message: `Processing Code Review Job ${jobId}`,
             context: CodeReviewJobProcessorService.name,
             metadata: { jobId, correlationId },
         });
+
+        const startTime = Date.now();
 
         try {
             await this.jobRepository.update(jobId, {
@@ -45,25 +48,41 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
             });
 
             const jobPayload = job.payload || {};
-            const { payload, event, platformType } = jobPayload as any;
+            const {
+                codeManagementPayload,
+                event,
+                platformType,
+                organizationAndTeamData,
+                teamAutomationId,
+            } = jobPayload as EnqueueCodeReviewJobInput;
 
-            if (!payload || !event || !platformType) {
+            if (
+                !codeManagementPayload ||
+                !event ||
+                !platformType ||
+                !organizationAndTeamData ||
+                !teamAutomationId
+            ) {
                 throw new Error('Invalid payload: missing required fields');
             }
 
             await this.runCodeReviewAutomationUseCase.execute({
-                payload,
+                codeManagementPayload,
                 event,
                 platformType,
-                throwOnError: true,
+                correlationId,
+                organizationAndTeamData,
+                teamAutomationId,
             });
 
             await this.markCompleted(jobId);
 
-            this.logger.log({
-                message: `Job ${jobId} completed successfully`,
-                context: CodeReviewJobProcessorService.name,
-            });
+            const durationMs = Date.now() - startTime;
+            this.metricsCollector?.recordHistogram(
+                'code_review_duration_ms',
+                durationMs,
+                { status: 'success' },
+            );
         } catch (error) {
             if (error.name === 'WorkflowPausedError') {
                 await this.jobRepository.update(jobId, {
@@ -88,6 +107,10 @@ export class CodeReviewJobProcessorService implements IJobProcessorService {
     }
 
     async handleFailure(jobId: string, error: Error): Promise<void> {
+        this.metricsCollector?.recordCounter('code_review_errors_total', 1, {
+            errorType: error.name || 'UnknownError',
+        });
+
         await this.jobRepository.update(jobId, {
             status: JobStatus.FAILED,
             errorClassification: ErrorClassification.PERMANENT,
