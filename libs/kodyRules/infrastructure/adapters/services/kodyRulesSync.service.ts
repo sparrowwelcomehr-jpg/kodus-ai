@@ -1317,9 +1317,9 @@ export class KodyRulesSyncService {
                             ParserType.ZOD,
                             kodyRulesIDEGeneratorSchema,
                             {
-                                provider: LLMModelProvider.OPENAI_GPT_4O_MINI,
+                                provider: LLMModelProvider.CLAUDE_3_5_SONNET,
                                 fallbackProvider:
-                                    LLMModelProvider.OPENAI_GPT_4O,
+                                    LLMModelProvider.CLAUDE_SONNET_4,
                             },
                         )
                         .setLLMJsonMode(true)
@@ -1530,9 +1530,9 @@ export class KodyRulesSyncService {
                             ParserType.ZOD,
                             kodyRulesIDEGeneratorSchemaOnboarding,
                             {
-                                provider: LLMModelProvider.GEMINI_2_5_FLASH,
+                                provider: LLMModelProvider.CLAUDE_3_5_SONNET,
                                 fallbackProvider:
-                                    LLMModelProvider.OPENAI_GPT_4O,
+                                    LLMModelProvider.CLAUDE_SONNET_4,
                             },
                         )
                         .setLLMJsonMode(true)
@@ -1697,9 +1697,9 @@ export class KodyRulesSyncService {
                             ParserType.ZOD,
                             kodyRulesManifestGeneratorSchemaOnboarding,
                             {
-                                provider: LLMModelProvider.GEMINI_2_5_FLASH,
+                                provider: LLMModelProvider.CLAUDE_3_5_SONNET,
                                 fallbackProvider:
-                                    LLMModelProvider.OPENAI_GPT_4O,
+                                    LLMModelProvider.CLAUDE_SONNET_4,
                             },
                         )
                         .setLLMJsonMode(true)

@@ -76,7 +76,7 @@ export abstract class BaseAgentProvider {
                 };
 
                 const provider = resolveProvider(options?.model);
-                const fallbackProvider = LLMModelProvider.OPENAI_GPT_4O;
+                const fallbackProvider = LLMModelProvider.CLAUDE_SONNET_4;
 
                 const promptRunner = new BYOKPromptRunnerService(
                     this.promptRunnerService,

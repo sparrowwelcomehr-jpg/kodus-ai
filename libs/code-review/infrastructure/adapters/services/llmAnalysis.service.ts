@@ -119,8 +119,8 @@ ${JSON.stringify(context?.suggestions) || 'No suggestions provided'}
         reviewModeResponse: ReviewModeResponse,
         context: AnalysisContext,
     ): Promise<AIAnalysisResult> {
-        const provider = LLMModelProvider.GEMINI_2_5_PRO;
-        const fallbackProvider = LLMModelProvider.NOVITA_DEEPSEEK_V3;
+        const provider = LLMModelProvider.CLAUDE_SONNET_4;
+        const fallbackProvider = LLMModelProvider.CLAUDE_3_5_SONNET;
         const runName = 'analyzeCodeWithAI';
 
         const promptRunner = new BYOKPromptRunnerService(
@@ -231,8 +231,8 @@ ${JSON.stringify(context?.suggestions) || 'No suggestions provided'}
         context: AnalysisContext,
         byokConfig: BYOKConfig,
     ): Promise<AIAnalysisResult> {
-        const defaultProvider = LLMModelProvider.GEMINI_2_5_PRO;
-        const defaultFallback = LLMModelProvider.NOVITA_DEEPSEEK_V3;
+        const defaultProvider = LLMModelProvider.CLAUDE_SONNET_4;
+        const defaultFallback = LLMModelProvider.CLAUDE_3_5_SONNET;
         const runName = 'analyzeCodeWithAI_v2';
 
         const promptRunner = new BYOKPromptRunnerService(
@@ -286,8 +286,8 @@ ${JSON.stringify(context?.suggestions) || 'No suggestions provided'}
                     return await promptRunner
                         .builder()
                         .setParser(ParserType.ZOD, schema, {
-                            provider: LLMModelProvider.OPENAI_GPT_4O_MINI,
-                            fallbackProvider: LLMModelProvider.OPENAI_GPT_4O,
+                            provider: LLMModelProvider.CLAUDE_3_5_SONNET,
+                            fallbackProvider: LLMModelProvider.CLAUDE_SONNET_4,
                         })
                         .setLLMJsonMode(true)
                         .setPayload(baseContext)
@@ -416,11 +416,11 @@ ${JSON.stringify(context?.suggestions) || 'No suggestions provided'}
         reviewMode: ReviewModeResponse = ReviewModeResponse.LIGHT_MODE,
     ) {
         const provider =
-            parameters.llmProvider || LLMModelProvider.GEMINI_2_5_PRO;
+            parameters.llmProvider || LLMModelProvider.CLAUDE_SONNET_4;
         const fallbackProvider =
-            provider === LLMModelProvider.OPENAI_GPT_4O
-                ? LLMModelProvider.GEMINI_2_5_PRO
-                : LLMModelProvider.OPENAI_GPT_4O;
+            provider === LLMModelProvider.CLAUDE_SONNET_4
+                ? LLMModelProvider.CLAUDE_3_5_SONNET
+                : LLMModelProvider.CLAUDE_SONNET_4;
         const runName = 'generateCodeSuggestions';
 
         const spanName = `${LLMAnalysisService.name}::${runName}`;
@@ -506,9 +506,9 @@ ${JSON.stringify(context?.suggestions) || 'No suggestions provided'}
         byokConfig: BYOKConfig,
     ): Promise<Partial<CodeSuggestion>[]> {
         const fallbackProvider =
-            provider === LLMModelProvider.OPENAI_GPT_4O
-                ? LLMModelProvider.NOVITA_DEEPSEEK_V3_0324
-                : LLMModelProvider.OPENAI_GPT_4O;
+            provider === LLMModelProvider.CLAUDE_SONNET_4
+                ? LLMModelProvider.CLAUDE_3_5_SONNET
+                : LLMModelProvider.CLAUDE_SONNET_4;
         const runName = 'severityAnalysis';
 
         const promptRunner = new BYOKPromptRunnerService(
@@ -628,8 +628,8 @@ ${JSON.stringify(context?.suggestions) || 'No suggestions provided'}
             }
         });
 
-        const provider = LLMModelProvider.GEMINI_2_5_PRO;
-        const fallbackProvider = LLMModelProvider.NOVITA_DEEPSEEK_V3;
+        const provider = LLMModelProvider.CLAUDE_SONNET_4;
+        const fallbackProvider = LLMModelProvider.CLAUDE_3_5_SONNET;
 
         const promptRunner = new BYOKPromptRunnerService(
             this.promptRunnerService,
@@ -684,9 +684,9 @@ ${JSON.stringify(context?.suggestions) || 'No suggestions provided'}
                         return await promptRunner
                             .builder()
                             .setParser(ParserType.ZOD, schema as any, {
-                                provider: LLMModelProvider.OPENAI_GPT_4O_MINI,
+                                provider: LLMModelProvider.CLAUDE_3_5_SONNET,
                                 fallbackProvider:
-                                    LLMModelProvider.OPENAI_GPT_4O,
+                                    LLMModelProvider.CLAUDE_SONNET_4,
                             })
                             .setLLMJsonMode(true)
                             .setPayload(payload)
@@ -810,9 +810,9 @@ ${JSON.stringify(context?.suggestions) || 'No suggestions provided'}
         codeSuggestions: Partial<CodeSuggestion>[],
     ): Promise<Partial<CodeSuggestion>[]> {
         const fallbackProvider =
-            provider === LLMModelProvider.OPENAI_GPT_4O
-                ? LLMModelProvider.NOVITA_DEEPSEEK_V3_0324
-                : LLMModelProvider.OPENAI_GPT_4O;
+            provider === LLMModelProvider.CLAUDE_SONNET_4
+                ? LLMModelProvider.CLAUDE_3_5_SONNET
+                : LLMModelProvider.CLAUDE_SONNET_4;
         const runName = 'validateImplementedSuggestions';
 
         const payload = { codePatch, codeSuggestions };
@@ -909,9 +909,9 @@ ${JSON.stringify(context?.suggestions) || 'No suggestions provided'}
         codeDiff: string,
     ): Promise<ReviewModeResponse> {
         const fallbackProvider =
-            provider === LLMModelProvider.OPENAI_GPT_4O
-                ? LLMModelProvider.NOVITA_DEEPSEEK_V3_0324
-                : LLMModelProvider.OPENAI_GPT_4O;
+            provider === LLMModelProvider.CLAUDE_SONNET_4
+                ? LLMModelProvider.CLAUDE_3_5_SONNET
+                : LLMModelProvider.CLAUDE_SONNET_4;
         const runName = 'selectReviewMode';
 
         const payload = { file, codeDiff };

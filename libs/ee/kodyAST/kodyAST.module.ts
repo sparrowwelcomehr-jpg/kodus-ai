@@ -16,6 +16,20 @@ const staticImports = [
 const providers = [];
 const moduleExports = [AST_ANALYSIS_SERVICE_TOKEN];
 
+// INTERNAL FORK: Always enable AST analysis (Enterprise Edition feature)
+// Note: Requires separate AST microservice to be deployed
+// Set API_ENABLE_CODE_REVIEW_AST=false in .env if you don't have AST service
+if (process.env.API_ENABLE_CODE_REVIEW_AST !== 'false') {
+    providers.push({
+        provide: AST_ANALYSIS_SERVICE_TOKEN,
+        useClass: CodeAstAnalysisService,
+    });
+} else {
+    // AST service disabled via env var
+    providers.push({ provide: AST_ANALYSIS_SERVICE_TOKEN, useValue: null });
+}
+
+/* Original code (disabled for internal use):
 if (environment.API_CLOUD_MODE && process.env.API_ENABLE_CODE_REVIEW_AST) {
     providers.push({
         provide: AST_ANALYSIS_SERVICE_TOKEN,
@@ -25,6 +39,7 @@ if (environment.API_CLOUD_MODE && process.env.API_ENABLE_CODE_REVIEW_AST) {
     // Self-hosted mode, provide null services
     providers.push({ provide: AST_ANALYSIS_SERVICE_TOKEN, useValue: null });
 }
+*/
 
 @Module({
     imports: staticImports,

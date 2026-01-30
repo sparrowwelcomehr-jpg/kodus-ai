@@ -71,8 +71,8 @@ export class CodeAstAnalysisService implements IASTAnalysisService {
     async analyzeASTWithAI(
         context: AnalysisContext,
     ): Promise<AIAnalysisResult> {
-        const provider = LLMModelProvider.NOVITA_DEEPSEEK_V3_0324;
-        const fallbackProvider = LLMModelProvider.OPENAI_GPT_4O;
+        const provider = LLMModelProvider.CLAUDE_SONNET_4;
+        const fallbackProvider = LLMModelProvider.CLAUDE_3_5_SONNET;
         const runName = 'analyzeASTWithAI';
 
         const payload = await this.prepareAnalysisContext(context);
@@ -723,8 +723,8 @@ export class CodeAstAnalysisService implements IASTAnalysisService {
         organizationAndTeamData: OrganizationAndTeamData,
         prNumber: number,
     ): Promise<ValidateCodeSemanticsResult | null> {
-        const provider = LLMModelProvider.GROQ_GPT_OSS_120B;
-        const fallbackProvider = LLMModelProvider.OPENAI_GPT_4O_MINI;
+        const provider = LLMModelProvider.CLAUDE_SONNET_4;
+        const fallbackProvider = LLMModelProvider.CLAUDE_3_5_SONNET;
         const runName = 'validateWithLLM';
         const spanName = `${CodeAstAnalysisService.name}::${runName}`;
 
@@ -819,8 +819,8 @@ export class CodeAstAnalysisService implements IASTAnalysisService {
         suggestion: Partial<CodeSuggestion>,
     ): Promise<{ isSimple: boolean; reason?: string }> {
         const runName = 'checkSuggestionSimplicity';
-        const provider = LLMModelProvider.GEMINI_2_5_FLASH;
-        const fallbackProvider = LLMModelProvider.OPENAI_GPT_4O_MINI;
+        const provider = LLMModelProvider.CLAUDE_3_5_SONNET;
+        const fallbackProvider = LLMModelProvider.CLAUDE_SONNET_4;
 
         const spanName = `${CodeAstAnalysisService.name}::${runName}`;
         const spanAttrs = {

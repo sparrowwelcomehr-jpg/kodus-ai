@@ -208,12 +208,12 @@ export class CommentManagerService implements ICommentManagerService {
                     Use this summary to concatenate the existing pull request summary with the new changed files context:`;
                 }
 
-                const fallbackProvider = LLMModelProvider.OPENAI_GPT_4O;
+                const fallbackProvider = LLMModelProvider.CLAUDE_SONNET_4;
                 userPrompt += `<changedFilesContext>${JSON.stringify(baseContext?.changedFiles) || 'No files changed'}</changedFilesContext>`;
 
                 const promptRunner = new BYOKPromptRunnerService(
                     this.promptRunnerService,
-                    LLMModelProvider.GEMINI_2_5_FLASH,
+                    LLMModelProvider.CLAUDE_SONNET_4,
                     fallbackProvider,
                     byokConfigValue,
                 );
@@ -254,7 +254,7 @@ export class CommentManagerService implements ICommentManagerService {
                                     repositoryId: repository?.id,
                                     provider:
                                         byokConfigValue?.main?.provider ||
-                                        LLMModelProvider.GEMINI_2_5_FLASH,
+                                        LLMModelProvider.CLAUDE_SONNET_4,
                                     fallbackProvider:
                                         byokConfigValue?.fallback?.provider ||
                                         fallbackProvider,
@@ -1041,9 +1041,9 @@ ${reviewOptions}
 
         try {
             const fallbackProvider =
-                provider === LLMModelProvider.OPENAI_GPT_4O
+                provider === LLMModelProvider.CLAUDE_SONNET_4
                     ? LLMModelProvider.NOVITA_DEEPSEEK_V3
-                    : LLMModelProvider.OPENAI_GPT_4O;
+                    : LLMModelProvider.CLAUDE_SONNET_4;
 
             const userPrompt = `<codeSuggestionsContext>${JSON.stringify(baseContext?.codeSuggestions) || 'No code suggestions provided'}</codeSuggestionsContext>`;
 

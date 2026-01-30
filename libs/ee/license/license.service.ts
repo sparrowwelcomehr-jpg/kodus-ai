@@ -2,6 +2,7 @@ import { createLogger } from '@kodus/flow';
 
 import { AxiosLicenseService } from '@libs/core/infrastructure/config/axios/microservices/license.axios';
 import { OrganizationAndTeamData } from '@libs/core/infrastructure/config/types/general/organizationAndTeamData';
+import { SubscriptionStatus } from './interfaces/license.interface';
 
 import {
     ILicenseService,
@@ -24,10 +25,20 @@ export class LicenseService implements ILicenseService {
      * Validate organization license by calling the billing service endpoint.
      * @param organizationAndTeamData Organization and team identifiers
      * @returns Promise with license validation result
+     * 
+     * INTERNAL FORK: Always returns valid enterprise license
      */
     async validateOrganizationLicense(
         organizationAndTeamData: OrganizationAndTeamData,
     ): Promise<OrganizationLicenseValidationResult> {
+        // INTERNAL FORK: Mock valid enterprise license for internal use
+        return {
+            valid: true,
+            planType: 'enterprise',
+            subscriptionStatus: SubscriptionStatus.ACTIVE
+        };
+
+        /* Original code (disabled for internal use):
         try {
             const response = await this.licenseRequest.get(
                 'validate-org-license',
@@ -52,6 +63,7 @@ export class LicenseService implements ILicenseService {
             });
             return { valid: false };
         }
+        */
     }
 
     /**

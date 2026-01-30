@@ -84,8 +84,8 @@ export class CommentAnalysisService {
 
             const promptRunner = new BYOKPromptRunnerService(
                 this.promptRunnerService,
-                LLMModelProvider.GEMINI_2_5_PRO,
-                LLMModelProvider.NOVITA_DEEPSEEK_V3_0324,
+                LLMModelProvider.CLAUDE_SONNET_4,
+                LLMModelProvider.CLAUDE_3_5_SONNET,
                 byokConfig,
             );
 
@@ -209,8 +209,8 @@ export class CommentAnalysisService {
 
             const promptRunner = new BYOKPromptRunnerService(
                 this.promptRunnerService,
-                LLMModelProvider.GEMINI_2_5_PRO,
-                LLMModelProvider.NOVITA_DEEPSEEK_V3_0324,
+                LLMModelProvider.CLAUDE_SONNET_4,
+                LLMModelProvider.CLAUDE_3_5_SONNET,
                 byokConfig,
             );
 
@@ -467,8 +467,8 @@ export class CommentAnalysisService {
 
             const promptRunner = new BYOKPromptRunnerService(
                 this.promptRunnerService,
-                LLMModelProvider.GEMINI_2_5_PRO,
-                LLMModelProvider.NOVITA_DEEPSEEK_V3_0324,
+                LLMModelProvider.CLAUDE_SONNET_4,
+                LLMModelProvider.CLAUDE_3_5_SONNET,
                 byokConfig,
             );
 

@@ -1380,9 +1380,9 @@ Analyze the suggestions and recommend the most relevant rules.`;
                             ParserType.ZOD,
                             kodyRulesRecommendationSchema,
                             {
-                                provider: LLMModelProvider.GEMINI_2_5_FLASH,
+                                provider: LLMModelProvider.CLAUDE_3_5_SONNET,
                                 fallbackProvider:
-                                    LLMModelProvider.OPENAI_GPT_4O,
+                                    LLMModelProvider.CLAUDE_SONNET_4,
                             },
                         )
                         .setLLMJsonMode(true)

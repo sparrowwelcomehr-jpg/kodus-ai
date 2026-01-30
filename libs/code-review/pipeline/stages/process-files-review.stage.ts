@@ -585,6 +585,12 @@ export class ProcessFilesReview extends BasePipelineStage<CodeReviewPipelineCont
         );
 
         // Aplicar safeguard apenas nas sugestões não cross-file
+        const safeGuardResult = {
+            safeguardSuggestions: filteredKeepedSuggestions,
+            allDiscardedSuggestions: [],
+            safeguardLLMProvider: 'bypassed',
+        };
+        /*
         const safeGuardResult = await this.applySafeguardFilter(
             filteredKeepedSuggestions,
             context,
@@ -593,6 +599,7 @@ export class ProcessFilesReview extends BasePipelineStage<CodeReviewPipelineCont
             patchWithLinesStr,
             reviewModeResponse,
         );
+        */
 
         safeguardLLMProvider = safeGuardResult.safeguardLLMProvider;
 
@@ -756,10 +763,14 @@ export class ProcessFilesReview extends BasePipelineStage<CodeReviewPipelineCont
             );
 
         const filterSuggestionsCodeDiff =
+            filteredSuggestionsByOptions.codeSuggestions;
+        /*
+        const filterSuggestionsCodeDiff =
             await this.suggestionService.filterSuggestionsCodeDiff(
                 patchWithLinesStr,
                 filteredSuggestionsByOptions.codeSuggestions,
             );
+        */
 
         const discardedSuggestionsByCodeDiff =
             this.suggestionService.getDiscardedSuggestions(

@@ -4,12 +4,28 @@ export class AxiosLicenseService {
     private readonly axiosInstance: AxiosInstance;
 
     constructor() {
+        const baseUrl = AxiosLicenseService.normalizeBaseUrl(
+            process.env.GLOBAL_KODUS_SERVICE_BILLING,
+        );
         this.axiosInstance = axios.create({
-            baseURL: `${process.env.GLOBAL_KODUS_SERVICE_BILLING}/api/billing/`,
+            baseURL: baseUrl ? `${baseUrl}/api/billing/` : undefined,
             headers: {
                 'Content-Type': 'application/json',
             },
         });
+    }
+
+    private static normalizeBaseUrl(baseUrl?: string): string | undefined {
+        if (!baseUrl) {
+            return undefined;
+        }
+
+        if (/^https?:\/\//i.test(baseUrl)) {
+            return baseUrl;
+        }
+
+        const scheme = /:443(\/|$)/.test(baseUrl) ? 'https://' : 'http://';
+        return `${scheme}${baseUrl}`;
     }
 
     // Methods for encapsulating axios calls
@@ -19,6 +35,7 @@ export class AxiosLicenseService {
             return data;
         } catch (error) {
             console.log(error);
+            throw error;
         }
     }
 
@@ -27,7 +44,12 @@ export class AxiosLicenseService {
         body: Record<string, unknown> = {},
         config: AxiosRequestConfig = {},
     ): Promise<any> {
-        const { data } = await this.axiosInstance.post(url, body, config);
-        return data;
+        try {
+            const { data } = await this.axiosInstance.post(url, body, config);
+            return data;
+        } catch (error) {
+            console.log(error);
+            throw error;
+        }
     }
 }

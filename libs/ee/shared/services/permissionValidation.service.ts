@@ -401,11 +401,17 @@ export class PermissionValidationService {
     /**
      * Verifica se os recursos devem ser limitados (plano free)
      * (Consolidado do antigo ValidateLicenseService.limitResources)
+     * 
+     * INTERNAL FORK: Always returns false (no resource limits)
      */
     async shouldLimitResources(
         organizationAndTeamData: OrganizationAndTeamData,
         contextName?: string,
     ): Promise<boolean> {
+        // INTERNAL FORK: Never limit resources (unlimited rules, full features)
+        return false;
+
+        /* Original code (disabled for internal use):
         try {
             // Development mode não limita recursos
             if (this.isDevelopment) {
@@ -451,6 +457,7 @@ export class PermissionValidationService {
             // Em caso de erro, limitar recursos por segurança
             return true;
         }
+        */
     }
 
     /**

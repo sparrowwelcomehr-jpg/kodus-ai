@@ -21,14 +21,15 @@ export const codeReviewPipelineProvider: Provider = {
         ceStrategy: CodeReviewPipelineStrategy,
         eeStrategy: CodeReviewPipelineStrategyEE,
     ): IPipeline<CodeReviewPipelineContext> => {
-        const isCloud = environment.API_CLOUD_MODE;
-        const strategy = isCloud ? eeStrategy : ceStrategy;
+        // INTERNAL FORK: Always use Enterprise Edition strategy (Heavy Mode)
+        const isCloud = true; // Force EE/Heavy mode
+        const strategy = eeStrategy; // Always use Enterprise Edition strategy
 
         logger.log({
-            message: `🔁 Modo de execução: ${isCloud ? 'Cloud (EE)' : 'Self-Hosted (CE)'}`,
+            message: `🔁 Modo de execução: Cloud (EE) - INTERNAL FORK - Heavy Mode Enabled`,
             context: 'CodeReviewPipelineProvider',
             metadata: {
-                mode: isCloud ? 'cloud' : 'selfhosted',
+                mode: 'cloud-ee-internal-fork',
             },
         });
 

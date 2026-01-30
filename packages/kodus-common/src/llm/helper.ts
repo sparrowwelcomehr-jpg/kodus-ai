@@ -283,6 +283,8 @@ export enum LLMModelProvider {
     OPENAI_GPT_4_1 = 'openai:gpt-4.1',
     OPENAI_GPT_O4_MINI = 'openai:o4-mini',
     CLAUDE_3_5_SONNET = 'anthropic:claude-3-5-sonnet-20241022',
+    CLAUDE_3_OPUS = 'anthropic:claude-3-opus-20240229',
+    CLAUDE_SONNET_4 = 'anthropic:claude-sonnet-4-20250514',
     GEMINI_2_0_FLASH = 'google:gemini-2.0-flash',
     GEMINI_2_5_PRO = 'google:gemini-2.5-pro',
     GEMINI_2_5_FLASH = 'google:gemini-2.5-flash',
@@ -344,6 +346,18 @@ export const MODEL_STRATEGIES: Record<LLMModelProvider, ModelStrategy> = {
         provider: 'anthropic',
         factory: getChatAnthropic,
         modelName: 'claude-3-5-sonnet-20241022',
+        defaultMaxTokens: -1,
+    },
+    [LLMModelProvider.CLAUDE_3_OPUS]: {
+        provider: 'anthropic',
+        factory: getChatAnthropic,
+        modelName: 'claude-3-opus-20240229',
+        defaultMaxTokens: -1,
+    },
+    [LLMModelProvider.CLAUDE_SONNET_4]: {
+        provider: 'anthropic',
+        factory: getChatAnthropic,
+        modelName: 'claude-sonnet-4-20250514',
         defaultMaxTokens: -1,
     },
 

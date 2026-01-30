@@ -4,12 +4,28 @@ export class AxiosMCPManagerService {
     private axiosInstance: AxiosInstance;
 
     constructor() {
+        const baseUrl = AxiosMCPManagerService.normalizeBaseUrl(
+            process.env.API_KODUS_SERVICE_MCP_MANAGER,
+        );
         this.axiosInstance = axios.create({
-            baseURL: process.env.API_KODUS_SERVICE_MCP_MANAGER,
+            baseURL: baseUrl,
             headers: {
                 'Content-Type': 'application/json',
             },
         });
+    }
+
+    private static normalizeBaseUrl(baseUrl?: string): string | undefined {
+        if (!baseUrl) {
+            return undefined;
+        }
+
+        if (/^https?:\/\//i.test(baseUrl)) {
+            return baseUrl;
+        }
+
+        const scheme = /:443(\/|$)/.test(baseUrl) ? 'https://' : 'http://';
+        return `${scheme}${baseUrl}`;
     }
 
     // Methods for encapsulating axios calls
@@ -19,11 +35,17 @@ export class AxiosMCPManagerService {
             return data;
         } catch (error) {
             console.log(error);
+            throw error;
         }
     }
 
     public async post(url: string, body = {}, config = {}) {
-        const { data } = await this.axiosInstance.post(url, body, config);
-        return data;
+        try {
+            const { data } = await this.axiosInstance.post(url, body, config);
+            return data;
+        } catch (error) {
+            console.log(error);
+            throw error;
+        }
     }
 }

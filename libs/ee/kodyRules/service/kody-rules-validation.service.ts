@@ -31,11 +31,17 @@ export class KodyRulesValidationService {
      * Validates if the total number of rules is within the allowed limit.
      * @param totalRules Total number of rules.
      * @returns True if the number of rules is within the limit, false otherwise.
+     * 
+     * INTERNAL FORK: Always returns true (unlimited rules)
      */
     async validateRulesLimit(
         organizationAndTeamData: OrganizationAndTeamData,
         totalRules: number,
     ): Promise<boolean> {
+        // INTERNAL FORK: Unlimited Kody Rules
+        return true;
+
+        /* Original code (disabled for internal use):
         const limited =
             await this.permissionValidationService.shouldLimitResources(
                 organizationAndTeamData,
@@ -47,6 +53,7 @@ export class KodyRulesValidationService {
         }
 
         return totalRules <= this.MAX_KODY_RULES;
+        */
     }
 
     /**
@@ -136,7 +143,8 @@ export class KodyRulesValidationService {
         const mergedRulesWithoutDuplicates =
             this.extractUniqueKodyRules(mergedRules);
 
-        const limit = this.isCloud ? 0 : this.MAX_KODY_RULES;
+        // INTERNAL FORK: No limit (0 = unlimited)
+        const limit = 0;
         const orderedRules = this.orderByCreatedAtAndLimit(
             mergedRulesWithoutDuplicates,
             limit,

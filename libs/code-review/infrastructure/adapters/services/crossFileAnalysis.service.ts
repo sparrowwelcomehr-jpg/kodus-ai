@@ -115,7 +115,7 @@ export class CrossFileAnalysisService {
 
         const language =
             context.codeReviewConfig.languageResultPrompt || 'en-US';
-        const provider = LLMModelProvider.GEMINI_2_5_PRO;
+        const provider = LLMModelProvider.CLAUDE_SONNET_4;
 
         try {
             // 1. Executar análise cross-file principal com arquivos preparados

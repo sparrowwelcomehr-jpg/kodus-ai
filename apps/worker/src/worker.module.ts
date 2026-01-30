@@ -26,7 +26,7 @@ import { ConfigService } from '@nestjs/config';
             imports: [SharedConfigModule],
             useFactory: (configService: ConfigService) => ({
                 http: configService.get('NODE_ENV') !== 'production',
-                port: 8001,
+                port: 8003,
             }),
             inject: [ConfigService],
         }),

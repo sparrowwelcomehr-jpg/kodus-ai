@@ -384,28 +384,28 @@ export class OutboxRelayService
                     'workflow.outbox.max_attempts': this.maxAttemptsOutbox,
                 });
 
+                // Note: message.job is not populated by RETURNING * (only job_id column)
+                // Always use payload.jobId which is set during enqueue
+                const rawPayload = message?.payload as unknown as
+                    | MessagePayload<MessagePayloadContent>
+                    | MessagePayloadContent
+                    | undefined;
+
+                const payloadContent =
+                    (rawPayload as MessagePayload<MessagePayloadContent>)
+                        ?.payload ??
+                    (rawPayload as MessagePayloadContent) ??
+                    {};
+
+                const correlationId = payloadContent?.correlationId;
+                const workflowType = payloadContent?.workflowType;
+                const jobId = payloadContent?.jobId;
+
+                span.setAttributes({
+                    'workflow.outbox.job.id': jobId,
+                });
+
                 try {
-                    // Note: message.job is not populated by RETURNING * (only job_id column)
-                    // Always use payload.jobId which is set during enqueue
-                    const rawPayload = message?.payload as unknown as
-                        | MessagePayload<MessagePayloadContent>
-                        | MessagePayloadContent
-                        | undefined;
-
-                    const payloadContent =
-                        (rawPayload as MessagePayload<MessagePayloadContent>)
-                            ?.payload ??
-                        (rawPayload as MessagePayloadContent) ??
-                        {};
-
-                    const correlationId = payloadContent?.correlationId;
-                    const workflowType = payloadContent?.workflowType;
-                    const jobId = payloadContent?.jobId;
-
-                    span.setAttributes({
-                        'workflow.outbox.job.id': jobId,
-                    });
-
                     await this.messageBroker.publishMessage(
                         {
                             exchange: message.exchange,
@@ -452,12 +452,14 @@ export class OutboxRelayService
                             try {
                                 await this.jobRepository.update(jobId, {
                                     status: JobStatus.FAILED,
-                                    errorClassification: ErrorClassification.PERMANENT,
+                                    errorClassification:
+                                        ErrorClassification.PERMANENT,
                                     lastError: `Outbox message failed after ${this.maxAttemptsOutbox} attempts: ${error.message}`,
                                 });
 
                                 this.logger.log({
-                                    message: 'Job marked as FAILED due to outbox publish failure',
+                                    message:
+                                        'Job marked as FAILED due to outbox publish failure',
                                     context: OutboxRelayService.name,
                                     metadata: {
                                         jobId,
@@ -467,7 +469,8 @@ export class OutboxRelayService
                                 });
                             } catch (updateError) {
                                 this.logger.error({
-                                    message: 'Failed to update job status to FAILED after outbox failure',
+                                    message:
+                                        'Failed to update job status to FAILED after outbox failure',
                                     context: OutboxRelayService.name,
                                     error: updateError,
                                     metadata: {

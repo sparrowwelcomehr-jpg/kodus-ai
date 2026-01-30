@@ -1600,10 +1600,18 @@ export class BitbucketService implements Omit<
                     ),
                 );
 
-            const prFilesWithDiffAndContents = await Promise.all(
-                prFiles
-                    .filter((file) => file.new?.path || file.old?.path)
-                    .map(async (file) => {
+            const prFilesWithDiffAndContents: any[] = [];
+            const BATCH_SIZE = 5;
+            const BATCH_DELAY_MS = 2000;
+
+            const filteredFiles = prFiles.filter(
+                (file) => file.new?.path || file.old?.path,
+            );
+
+            for (let i = 0; i < filteredFiles.length; i += BATCH_SIZE) {
+                const batch = filteredFiles.slice(i, i + BATCH_SIZE);
+                const batchResults = await Promise.all(
+                    batch.map(async (file) => {
                         const isRemoved = file.status === 'removed';
                         const pathForContent = isRemoved
                             ? file.old?.path
@@ -1612,36 +1620,69 @@ export class BitbucketService implements Omit<
                             ? pr.destination?.commit?.hash
                             : pr.source?.commit?.hash;
 
-                        const contents =
-                            pathForContent && commitForContent
-                                ? await bitbucketAPI.source
-                                      .read({
-                                          repo_slug: `{${repo.id}}`,
-                                          workspace: `{${repo.workspaceId}}`,
-                                          commit: commitForContent,
-                                          path: pathForContent,
-                                      })
-                                      .then((res) => res.data as string)
-                                      .catch(() => null)
-                                : null;
+                        let contents = null;
+                        if (pathForContent && commitForContent) {
+                            let retries = 3;
+                            while (retries > 0) {
+                                try {
+                                    contents = await bitbucketAPI.source
+                                        .read({
+                                            repo_slug: `{${repo.id}}`,
+                                            workspace: `{${repo.workspaceId}}`,
+                                            commit: commitForContent,
+                                            path: pathForContent,
+                                        })
+                                        .then((res) => res.data as string);
+                                    break;
+                                } catch (error) {
+                                    if (error.status === 429 && retries > 1) {
+                                        retries--;
+                                        const delay = (3 - retries) * 5000;
+                                        await new Promise((resolve) =>
+                                            setTimeout(resolve, delay),
+                                        );
+                                        continue;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
 
                         const pathForDiff = isRemoved
                             ? file.old?.path
                             : (file.new?.path ?? file.old?.path);
 
-                        const diff = pathForDiff
-                            ? await bitbucketAPI.commits
-                                  .getDiff({
-                                      repo_slug: `{${repo.id}}`,
-                                      workspace: `{${repo.workspaceId}}`,
-                                      spec: `${pr.source?.commit?.hash}..${pr.destination?.commit?.hash}`,
-                                      path: pathForDiff,
-                                  })
-                                  .then((res) =>
-                                      this.convertDiff(res.data as string),
-                                  )
-                                  .catch(() => null)
-                            : null;
+                        let diff = null;
+                        if (pathForDiff) {
+                            let retries = 3;
+                            while (retries > 0) {
+                                try {
+                                    diff = await bitbucketAPI.commits
+                                        .getDiff({
+                                            repo_slug: `{${repo.id}}`,
+                                            workspace: `{${repo.workspaceId}}`,
+                                            spec: `${pr.source?.commit?.hash}..${pr.destination?.commit?.hash}`,
+                                            path: pathForDiff,
+                                        })
+                                        .then((res) =>
+                                            this.convertDiff(
+                                                res.data as string,
+                                            ),
+                                        );
+                                    break;
+                                } catch (error) {
+                                    if (error.status === 429 && retries > 1) {
+                                        retries--;
+                                        const delay = (3 - retries) * 5000;
+                                        await new Promise((resolve) =>
+                                            setTimeout(resolve, delay),
+                                        );
+                                        continue;
+                                    }
+                                    break;
+                                }
+                            }
+                        }
 
                         return {
                             ...file,
@@ -1649,7 +1690,15 @@ export class BitbucketService implements Omit<
                             diff,
                         };
                     }),
-            );
+                );
+                prFilesWithDiffAndContents.push(...batchResults);
+
+                if (i + BATCH_SIZE < filteredFiles.length) {
+                    await new Promise((resolve) =>
+                        setTimeout(resolve, BATCH_DELAY_MS),
+                    );
+                }
+            }
 
             return prFilesWithDiffAndContents.map((file) => ({
                 filename: file.new?.path ?? file.old?.path,
@@ -2009,27 +2058,50 @@ export class BitbucketService implements Omit<
             const bitbucketAPI =
                 this.instanceBitbucketApi(bitbucketAuthDetails);
 
-            const commits = await bitbucketAPI.repositories.listCommits({
-                repo_slug: `{${repo.id}}`,
-                workspace: `{${repo.workspaceId}}`,
-                pagelen: 1,
-                include: pullRequest.head?.ref || pullRequest.base?.ref || '',
-            });
+            const commitHash =
+                pullRequest.source?.commit?.hash ||
+                pullRequest.head?.sha ||
+                (
+                    await bitbucketAPI.repositories.listCommits({
+                        repo_slug: `{${repo.id}}`,
+                        workspace: `{${repo.workspaceId}}`,
+                        pagelen: 1,
+                        include:
+                            pullRequest.head?.ref ||
+                            pullRequest.base?.ref ||
+                            '',
+                    })
+                )?.data?.values?.[0]?.hash;
 
-            const commit = commits?.data?.values?.[0];
-
-            if (!commit) {
+            if (!commitHash) {
                 return null;
             }
 
-            const fileContent = await bitbucketAPI.source
-                .read({
-                    commit: commit.hash,
-                    path: file.filename,
-                    repo_slug: `{${repo.id}}`,
-                    workspace: `{${repo.workspaceId}}`,
-                })
-                .then((res) => res.data as string);
+            let fileContent: string;
+            let retries = 3;
+            while (retries > 0) {
+                try {
+                    fileContent = await bitbucketAPI.source
+                        .read({
+                            commit: commitHash,
+                            path: file.filename,
+                            repo_slug: `{${repo.id}}`,
+                            workspace: `{${repo.workspaceId}}`,
+                        })
+                        .then((res) => res.data as string);
+                    break;
+                } catch (error) {
+                    if (error.status === 429 && retries > 1) {
+                        retries--;
+                        const delay = (3 - retries) * 5000; // 5s, 10s delay
+                        await new Promise((resolve) =>
+                            setTimeout(resolve, delay),
+                        );
+                        continue;
+                    }
+                    throw error;
+                }
+            }
 
             return {
                 data: {
@@ -2059,11 +2131,50 @@ export class BitbucketService implements Omit<
         try {
             const { organizationAndTeamData, repository, prNumber } = params;
 
-            const pullRequests = await this.getPullRequests({
+            const bitbucketAuthDetails = await this.getAuthDetails(
                 organizationAndTeamData,
+            );
+
+            if (!bitbucketAuthDetails) {
+                this.logger.warn({
+                    message: 'Bitbucket auth details not found',
+                    context: BitbucketService.name,
+                    metadata: params,
+                });
+                return null;
+            }
+
+            const repo = await this.getRepoById(
+                organizationAndTeamData,
+                repository.id,
+            );
+
+            if (!repo) {
+                this.logger.warn({
+                    message: `Repository ${repository.name} (id: ${repository.id}) not found`,
+                    context: BitbucketService.name,
+                    metadata: params,
+                });
+                return null;
+            }
+
+            const bitbucketAPI =
+                this.instanceBitbucketApi(bitbucketAuthDetails);
+
+            const response = await bitbucketAPI.pullrequests.get({
+                pull_request_id: prNumber,
+                repo_slug: `{${repo.id}}`,
+                workspace: `{${repo.workspaceId}}`,
             });
 
-            return pullRequests.find((pr) => pr.id === prNumber.toString());
+            if (!response?.data) {
+                return null;
+            }
+
+            return this.transformPullRequest(
+                response.data,
+                organizationAndTeamData,
+            );
         } catch (error) {
             this.logger.error({
                 message: 'Error to get pull request by number',

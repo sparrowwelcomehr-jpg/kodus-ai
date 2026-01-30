@@ -10,6 +10,9 @@ x-app-service-template: &app-service-defaults
         - CHOKIDAR_USEPOLLING=false
         - API_DEVELOPMENT_MODE=${API_DEVELOPMENT_MODE:-true}
     restart: unless-stopped
+    dns:
+        - 8.8.8.8
+        - 8.8.4.4
     volumes:
         - .:/usr/src/app:delegated
         - node_modules_cache:/usr/src/app/node_modules
@@ -24,11 +27,11 @@ services:
     #----------------------------------------------------------------
     api:
         <<: *app-service-defaults
-        container_name: kodus_api
+        container_name: kodus-api
         ports:
-            - '${API_PORT:-3001}:${API_PORT:-3001}'
-            - '9229:9229'
-            - '8000:8000'
+            - "${API_PORT:-3001}:${API_PORT:-3001}"
+            - "9229:9229"
+            - "8000:8000"
         command: yarn start:dev:api
         deploy:
             resources:
@@ -37,7 +40,7 @@ services:
                 reservations:
                     memory: 512M
         healthcheck:
-            test: ['CMD', 'node', '-e', 'process.exit(0)']
+            test: ["CMD", "node", "-e", "process.exit(0)"]
             interval: 30s
             timeout: 10s
             retries: 3
@@ -52,42 +55,45 @@ services:
             - RUN_MIGRATIONS=true
             - PYROSCOPE_SERVER_ADDRESS=${PYROSCOPE_SERVER_ADDRESS:-http://pyroscope:4040}
             - PYROSCOPE_HEAP_PROFILING=${PYROSCOPE_HEAP_PROFILING:-true}
+            - API_KODUS_SERVICE_MCP_MANAGER=http://kodus-mcp-manager:3101
+            - API_KODUS_MCP_SERVER_URL=http://kodus-api:3001/mcp
 
     worker:
         <<: *app-service-defaults
         container_name: kodus_worker
         ports:
-            - '9231:9231'
-            - '8001:8001'
+            - "9231:9231"
         command: yarn start:dev:worker
         deploy:
             resources:
                 limits:
-                    memory: 1G
+                    memory: 4G
                 reservations:
                     memory: 512M
         healthcheck:
-            test: ['CMD', 'node', '-e', 'process.exit(0)']
+            test: ["CMD", "node", "-e", "process.exit(0)"]
             interval: 30s
             timeout: 10s
             retries: 3
             start_period: 60s
         environment:
             - API_CLOUD_MODE=${API_CLOUD_MODE:-false}
-            - NODE_OPTIONS=--max-old-space-size=800 --max-semi-space-size=64
+            - NODE_OPTIONS=--max-old-space-size=3072 --max-semi-space-size=128
             - DEBUG_PORT=9231
             - COMPONENT_TYPE=worker
             - API_LOG_PRETTY=true
             - PYROSCOPE_SERVER_ADDRESS=${PYROSCOPE_SERVER_ADDRESS:-http://pyroscope:4040}
             - PYROSCOPE_HEAP_PROFILING=${PYROSCOPE_HEAP_PROFILING:-true}
+            - API_KODUS_SERVICE_MCP_MANAGER=http://kodus-mcp-manager:3101
+            - API_SERVICE_AST_URL=http://kodus-service-ast:5001
 
     webhooks:
         <<: *app-service-defaults
         container_name: kodus_webhooks
         ports:
-            - '${API_WEBHOOKS_PORT:-3332}:${API_WEBHOOKS_PORT:-3332}'
-            - '9232:9232'
-            - '8002:8002'
+            - "${API_WEBHOOKS_PORT:-3332}:${API_WEBHOOKS_PORT:-3332}"
+            - "9232:9232"
+            - "8002:8002"
         command: yarn start:dev:webhooks
         deploy:
             resources:
@@ -96,7 +102,7 @@ services:
                 reservations:
                     memory: 256M
         healthcheck:
-            test: ['CMD', 'node', '-e', 'process.exit(0)']
+            test: ["CMD", "node", "-e", "process.exit(0)"]
             interval: 30s
             timeout: 10s
             retries: 3
@@ -119,7 +125,7 @@ services:
         image: grafana/pyroscope:latest
         container_name: pyroscope
         ports:
-            - '4040:4040'
+            - "4040:4040"
         volumes:
             - pyroscope-data:/var/lib/pyroscope
         networks:
@@ -136,7 +142,7 @@ services:
         image: pgvector/pgvector:pg16
         container_name: db_postgres
         ports:
-            - '5432:5432'
+            - "5432:5432"
         environment:
             POSTGRES_USER: ${API_PG_DB_USERNAME}
             POSTGRES_PASSWORD: ${API_PG_DB_PASSWORD}
@@ -150,8 +156,8 @@ services:
         healthcheck:
             test:
                 [
-                    'CMD-SHELL',
-                    'pg_isready -U ${API_PG_DB_USERNAME} -d ${API_PG_DB_DATABASE}',
+                    "CMD-SHELL",
+                    "pg_isready -U ${API_PG_DB_USERNAME} -d ${API_PG_DB_DATABASE}",
                 ]
             interval: 5s
             timeout: 3s
@@ -165,7 +171,7 @@ services:
         image: mongo:8
         container_name: mongodb
         ports:
-            - '27017:27017'
+            - "27017:27017"
         volumes:
             - mongodbdata:/data/db
         environment:
@@ -178,7 +184,7 @@ services:
         healthcheck:
             test:
                 [
-                    'CMD-SHELL',
+                    "CMD-SHELL",
                     "echo 'db.runCommand({ ping: 1 }).ok' | mongosh --quiet mongodb://$${MONGO_INITDB_ROOT_USERNAME}:$${MONGO_INITDB_ROOT_PASSWORD}@localhost:27017/admin | grep -q 1",
                 ]
             interval: 10s
@@ -186,12 +192,39 @@ services:
             retries: 20
             start_period: 20s
 
+    rabbitmq:
+        profiles:
+            - local-db
+            - infra
+        build:
+            context: .
+            dockerfile: docker/Dockerfile.rabbitmq
+        container_name: rabbitmq
+        ports:
+            - "5672:5672"
+            - "15672:15672"
+        volumes:
+            - rabbitmq_data:/var/lib/rabbitmq
+        environment:
+            RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-user}
+            RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-password}
+        networks:
+            - kodus-backend-services
+        restart: unless-stopped
+        healthcheck:
+            test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+            interval: 10s
+            timeout: 5s
+            retries: 20
+            start_period: 40s
+
 volumes:
     yalc_store:
     node_modules_cache:
     pgdata:
     mongodbdata:
     pyroscope-data:
+    rabbitmq_data:
 
 networks:
     kodus-backend-services:

@@ -31,7 +31,7 @@ async function bootstrap() {
 
     try {
         appContext = await NestFactory.createApplicationContext(WorkerModule, {
-            snapshot: true,
+            snapshot: false,
         });
 
         logger = appContext.get(LoggerWrapperService);

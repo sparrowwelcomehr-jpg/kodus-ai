@@ -753,8 +753,8 @@ export class KodyRulesAnalysisService implements IKodyRulesAnalysisService {
         const builder = promptRunner
             .builder()
             .setParser(ParserType.ZOD, kodyRulesClassifierSchema, {
-                provider: LLMModelProvider.OPENAI_GPT_4O_MINI,
-                fallbackProvider: LLMModelProvider.OPENAI_GPT_4O,
+                provider: LLMModelProvider.CLAUDE_3_5_SONNET,
+                fallbackProvider: LLMModelProvider.CLAUDE_SONNET_4,
             })
             .setLLMJsonMode(true)
             .setTemperature(0)
@@ -897,8 +897,8 @@ export class KodyRulesAnalysisService implements IKodyRulesAnalysisService {
         const builder = promptRunner
             .builder()
             .setParser(ParserType.ZOD, kodyRulesGeneratorSchema, {
-                provider: LLMModelProvider.OPENAI_GPT_4O_MINI,
-                fallbackProvider: LLMModelProvider.OPENAI_GPT_4O,
+                provider: LLMModelProvider.CLAUDE_3_5_SONNET,
+                fallbackProvider: LLMModelProvider.CLAUDE_SONNET_4,
             })
             .setLLMJsonMode(true)
             .setTemperature(0)
